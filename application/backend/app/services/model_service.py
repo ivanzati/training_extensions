@@ -57,14 +57,14 @@ class ModelService(BaseSessionManagedService):
             raise ResourceNotFoundError(ResourceType.MODEL, str(model_id))
         return ModelRevision.model_validate(model_rev_db)
 
-    def rename_model(self, project_id: UUID, model_id: UUID, model_metadata: dict[str, str]) -> ModelRevision:
+    def rename_model(self, project_id: UUID, model_id: UUID, name: str) -> ModelRevision:
         """
         Rename a model revision.
 
         Args:
             project_id (UUID): The unique identifier of the project whose models to get.
             model_id (UUID): The unique identifier of the model to retrieve.
-            model_metadata: Dict containing updated model revision name
+            name: new model revision name
 
         Returns:
             ModelRevision: The model revision object containing the model's updated information.
@@ -77,10 +77,8 @@ class ModelService(BaseSessionManagedService):
         if not model_rev_db:
             raise ResourceNotFoundError(ResourceType.MODEL, str(model_id))
 
-        new_name = model_metadata.get("name")
-        if new_name is not None:
-            model_rev_db.name = new_name
-            model_rev_repo.update(model_rev_db)
+        model_rev_db.name = name
+        model_rev_repo.update(model_rev_db)
         return ModelRevision.model_validate(model_rev_db)
 
     @parent_process_only

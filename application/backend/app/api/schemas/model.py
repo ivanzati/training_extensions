@@ -3,10 +3,18 @@
 
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from app.core.models import BaseIDModel
 from app.models import TrainingInfo
+
+
+class ModelUpdateName(BaseModel):
+    """Schema for updating project name"""
+
+    name: str
+
+    model_config = {"json_schema_extra": {"example": {"name": "updated_model_name"}}}
 
 
 class ModelView(BaseIDModel):
