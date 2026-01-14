@@ -147,6 +147,13 @@
       matchDepNames: ["docker/dockerfile"],
     },
 
+    // Disable images upgrades for release/2.6 branch
+    {
+      enabled: false,
+      matchDatasources: ["docker"],
+      matchBaseBranches: ["release/2.6"],
+    },
+
     // Group GitHub Actions updates
     {
       enabled: true,
@@ -155,6 +162,14 @@
       matchManagers: ["github-actions"],
       matchPackagePatterns: ["*"],
       schedule: ["* * 1,15 * *"], // twice a month
+      matchBaseBranches: ["main"],
+    },
+
+    // Disable upgrades for non-main branches
+    {
+      enabled: false,
+      matchManagers: ["github-actions"],
+      matchBaseBranches: ["!main"],
     },
 
     // uv version used in GitHub Actions is updated manually
