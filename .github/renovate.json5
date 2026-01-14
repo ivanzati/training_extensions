@@ -196,6 +196,13 @@
       matchDepNames: ["mcr.microsoft.com/playwright"],
       matchUpdateTypes: ["major", "minor", "patch"],
     },
+
+    // Disable lockFileMaintenance for release/2.6 branch
+    {
+      "matchBaseBranches": ["release/2.6"],
+      "matchUpdateTypes": ["lockFileMaintenance"],
+      "enabled": false
+    },
   ],
 
   // Enable security upgrades
