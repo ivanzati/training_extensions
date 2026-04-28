@@ -14,20 +14,37 @@ from app.api.dependencies import get_pipeline_metrics_service, get_pipeline_serv
 from app.api.schemas import PipelineMetricsView, PipelineView
 from app.api.validators import ProjectID
 from app.models import DataCollectionConfig, DataCollectionPolicyAdapter, PipelineStatus
-from app.services import PipelineMetricsService, PipelineService, ResourceNotFoundError, SystemService
+from app.services import PipelineMetricsService, PipelineService, SystemService
+from app.services.pipeline_service import (
+    DeviceInt8NotSupportedError,
+    IncompatibleModelVariantError,
+    OtherProjectActiveError,
+)
 
 router = APIRouter(prefix="/api/projects/{project_id}/pipeline", tags=["Pipelines"])
 
 UPDATE_PIPELINE_BODY_DESCRIPTION = """
 Partial pipeline configuration update. May contain any subset of fields including 'device', 'data_collection', 
-'source_id', 'sink_id', or 'model_id'. Fields not included in the request will remain unchanged.
+'source_id', 'sink_id', 'model_id', or 'model_variant_id'. Fields not included in the request will remain unchanged.
+
+When 'model_id' is provided without 'model_variant_id', the default FP16 OpenVINO variant is selected automatically.
+Only OpenVINO model variants can be used for inference. If an INT8 variant is selected, the server validates that the 
+inference device supports INT8.
 """
 UPDATE_PIPELINE_BODY_EXAMPLES = {
     "switch_model": Example(
         summary="Switch active model",
-        description="Change the active model of the pipeline",
+        description="Change the active model of the pipeline (defaults to FP16 OpenVINO variant)",
         value={
             "model_id": "c1feaabc-da2b-442e-9b3e-55c11c2c2ff3",
+        },
+    ),
+    "switch_model_variant": Example(
+        summary="Switch active model with specific variant",
+        description="Change the active model and select a specific model variant (must be OpenVINO format)",
+        value={
+            "model_id": "c1feaabc-da2b-442e-9b3e-55c11c2c2ff3",
+            "model_variant_id": "a2d3e4f5-1234-5678-9abc-def012345678",
         },
     ),
     "reconfigure": Example(
@@ -61,7 +78,7 @@ UPDATE_PIPELINE_BODY_EXAMPLES = {
     ),
     "change_device": Example(
         summary="Change inference device",
-        description="Change the device used for model inference (e.g., 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')",
+        description="Change the device used for model inference (e.g., 'cpu', 'xpu', 'xpu-1')",
         value={"device": "xpu"},
     ),
 }
@@ -73,7 +90,7 @@ UPDATE_PIPELINE_BODY_EXAMPLES = {
     responses={
         status.HTTP_200_OK: {"description": "Pipeline found"},
         status.HTTP_400_BAD_REQUEST: {"description": "Invalid project ID"},
-        status.HTTP_404_NOT_FOUND: {"description": "Pipeline not found"},
+        status.HTTP_404_NOT_FOUND: {"description": "Project or pipeline not found"},
     },
 )
 def get_pipeline(
@@ -81,11 +98,8 @@ def get_pipeline(
     pipeline_service: Annotated[PipelineService, Depends(get_pipeline_service)],
 ) -> PipelineView:
     """Get info about a given pipeline"""
-    try:
-        pipeline = pipeline_service.get_pipeline_by_id(project_id)
-        return PipelineView.model_validate(pipeline, from_attributes=True)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    pipeline = pipeline_service.get_pipeline_by_id(project_id)
+    return PipelineView.model_validate(pipeline, from_attributes=True)
 
 
 @router.patch(
@@ -93,9 +107,12 @@ def get_pipeline(
     response_model=PipelineView,
     responses={
         status.HTTP_200_OK: {"description": "Pipeline successfully reconfigured"},
-        status.HTTP_400_BAD_REQUEST: {"description": "Invalid project ID or request body"},
-        status.HTTP_404_NOT_FOUND: {"description": "Pipeline not found"},
-        status.HTTP_409_CONFLICT: {"description": "Pipeline cannot be reconfigured"},
+        status.HTTP_400_BAD_REQUEST: {"description": "Invalid request body or project ID"},
+        status.HTTP_404_NOT_FOUND: {"description": "Project or pipeline not found"},
+        status.HTTP_409_CONFLICT: {"description": "Pipeline cannot be enabled"},
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            "description": "Invalid model variant (e.g., non-OpenVINO format or INT8 not supported on device)"
+        },
     },
 )
 def update_pipeline(
@@ -131,9 +148,13 @@ def update_pipeline(
             pipeline_config["data_collection"] = DataCollectionConfig.model_validate(data_collection)
         updated = pipeline_service.update_pipeline(project_id, pipeline_config)
         return PipelineView.model_validate(updated, from_attributes=True)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except IncompatibleModelVariantError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
+    except DeviceInt8NotSupportedError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
+    except OtherProjectActiveError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 
@@ -157,9 +178,7 @@ def enable_pipeline(
     """
     try:
         pipeline_service.update_pipeline(project_id, {"status": PipelineStatus.RUNNING})
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except ValidationError as e:
+    except OtherProjectActiveError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 
@@ -169,7 +188,7 @@ def enable_pipeline(
     responses={
         status.HTTP_204_NO_CONTENT: {"description": "Pipeline successfully disabled"},
         status.HTTP_400_BAD_REQUEST: {"description": "Invalid project ID"},
-        status.HTTP_404_NOT_FOUND: {"description": "Pipeline not found"},
+        status.HTTP_404_NOT_FOUND: {"description": "Project or pipeline not found"},
     },
 )
 def disable_pipeline(
@@ -177,10 +196,7 @@ def disable_pipeline(
     pipeline_service: Annotated[PipelineService, Depends(get_pipeline_service)],
 ) -> None:
     """Stop a pipeline. The pipeline will become idle, and it won't process any data until re-enabled."""
-    try:
-        pipeline_service.update_pipeline(project_id, {"status": PipelineStatus.IDLE})
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    pipeline_service.update_pipeline(project_id, {"status": PipelineStatus.IDLE})
 
 
 @router.get(
@@ -211,7 +227,5 @@ def get_project_metrics(
     try:
         pipeline_metrics = pipeline_metrics_service.get_pipeline_metrics(project_id, time_window)
         return PipelineMetricsView.model_validate(pipeline_metrics, from_attributes=True)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

@@ -19,7 +19,18 @@
   // regenerate lock weekly https://docs.renovatebot.com/configuration-options/#lockfilemaintenance
   lockFileMaintenance: {
     enabled: true,
-    schedule: ["* * * * 0"], // weekly
+    schedule: ["* * * * 0"], // weekly on Sunday
+    // `automerge` is not set here
+    // controlled via RENOVATE_AUTOMERGE env variable
+    automergeType: "pr",
+    reviewers: ["sys-geti"],
+    platformAutomerge: true,
+
+    // Renovate does not assign reviewers and assignees to
+    // automerge-enabled PR unless it fails status checks.
+    // With this setting Renovate will instead assign reviewers and
+    // assignees for automerging PRs at time of creation.
+    assignAutomerge: true,
   },
 
   extends: [
@@ -37,14 +48,14 @@
   // `matchBaseBranches` in specific rule
   baseBranches: ["develop", "release/2.6"],
 
-  // https://docs.renovatebot.com/modules/manager/#disabling-managers
-  pip_requirements: {
-    // Prevent renovate from trying to update demo code
-    enabled: false,
-    managerFilePatterns: [
-      "library/src/otx/backend/native/exporter/exportable_code/demo/requirements.txt",
-    ],
-  },
+  enabledManagers: [
+    "github-actions",
+    "pep621",
+    "dockerfile",
+    "npm",
+    "cargo",
+    "custom.regex",
+  ],
 
   // Set limit to 5
   ignorePresets: [":prHourlyLimit2"],
@@ -59,7 +70,13 @@
       pinDigests: true,
       groupName: "Pin images",
       groupSlug: "pin-images",
-      schedule: ["* * * * 0"], // weekly
+      schedule: ["* * * * 6"], // weekly on Saturday
+      // `automerge` is not set here
+      // controlled via RENOVATE_AUTOMERGE env variable
+      automergeType: "pr",
+      reviewers: ["sys-geti"],
+      platformAutomerge: true,
+      assignAutomerge: true,
     },
 
     // Disable python base image upgrades, except patch and digital pinning
@@ -159,7 +176,7 @@
       enabled: true,
       separateMajorMinor: false,
       groupName: "GitHub Actions",
-      matchManagers: ["github-actions"],
+      matchManagers: ["github-actions", "custom.regex"],
       matchPackagePatterns: ["*"],
       schedule: ["* * 1,15 * *"], // twice a month
       matchBaseBranches: ["main"],
@@ -202,6 +219,17 @@
       "matchBaseBranches": ["release/2.6"],
       "matchUpdateTypes": ["lockFileMaintenance"],
       "enabled": false
+    },
+  ],
+
+  // Is used to upgrade Renovate version
+  customManagers: [
+    {
+      fileMatch: ["^\\.github/workflows/[^/]+\\.ya?ml$"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+.+version: (?<currentValue>.*)",
+        "# renovate: datasource=(?<datasource>.*?)\\s+export RENOVATE_IMAGE=(?<depName>[^:]+):(?<currentValue>[^@]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?",
+      ],
     },
   ],
 

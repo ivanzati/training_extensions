@@ -1,11 +1,8 @@
-// Copyright (C) 2025 Intel Corporation
+// Copyright (C) 2025-2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { API_BASE_URL } from '../../../api/client';
+const VALID_VIDEO_EXT = ['mp4', 'avi', 'mkv', 'mov', 'webm', 'm4v'];
+const VALID_IMAGE_EXT = ['jpg', 'jpeg', 'png', 'jfif', 'tif', 'tiff', 'webp', 'bmp'];
+export const VALID_EXT = [...VALID_VIDEO_EXT, ...VALID_IMAGE_EXT];
 
-const getBaseUrl = (projectId: string, itemId: string) =>
-    `${API_BASE_URL}/api/projects/${projectId}/dataset/items/${itemId}`;
-
-export const getThumbnailUrl = (projectId: string, itemId: string) => {
-    return `${getBaseUrl(projectId, itemId)}/thumbnail`;
-};
+export const isVideoFile = (file: File) => VALID_VIDEO_EXT.includes(file.name.split('.').pop()?.toLowerCase() ?? '');

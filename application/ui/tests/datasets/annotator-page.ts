@@ -3,6 +3,9 @@
 
 import { expect, type Page } from '@playwright/test';
 
+import { paths } from '../../src/constants/paths';
+import { DatasetSubset } from '../../src/constants/shared-types';
+
 export class AnnotatorPage {
     constructor(private readonly page: Page) {}
 
@@ -87,5 +90,57 @@ export class AnnotatorPage {
 
     async getZoomValue() {
         return this.page.getByTestId('zoom-level');
+    }
+
+    getAnnotationsList() {
+        return this.page.getByTestId('annotation-layer');
+    }
+
+    async getAnnotationsListItems(label: 'annotation rect' | 'prediction rect' | 'annotation polygon') {
+        return this.getAnnotationsList()
+            .getByLabel(label)
+            .evaluateAll((nodes) => nodes.filter((node) => !node.closest('mask')));
+    }
+
+    getAnnotatorMode(mode: 'annotation' | 'prediction') {
+        return this.page.getByTestId('annotator-modes-id').getByRole('button', { name: mode });
+    }
+
+    async openAnnotationMode() {
+        await this.getAnnotatorMode('annotation').click();
+    }
+
+    async openPredictionMode() {
+        await this.getAnnotatorMode('prediction').click();
+    }
+
+    getPrimaryToolbar() {
+        return this.page.getByLabel('primary toolbar');
+    }
+
+    async editPrediction() {
+        await this.page.getByRole('button', { name: 'Edit prediction' }).click();
+    }
+
+    async goto(projectId: string, datasetItemId: string) {
+        await this.page.goto(paths.project.dataset.item.index({ projectId, datasetItemId }));
+    }
+
+    async selectSubset(subset: DatasetSubset) {
+        await this.page.getByRole('button', { name: /Select subset/ }).click();
+        await this.page.getByRole('option', { name: new RegExp(subset, 'i') }).click();
+    }
+
+    getSelectedSubset() {
+        return this.page.getByTestId('selected-subset-badge');
+    }
+
+    async submit() {
+        await this.page.getByRole('button', { name: 'Submit' }).click();
+    }
+
+    async selectMediaItem(name: string) {
+        const sidebarItems = this.page.getByRole('listbox', { name: 'sidebar-items' });
+        await sidebarItems.getByRole('img', { name }).click();
     }
 }

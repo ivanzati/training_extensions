@@ -1,6 +1,8 @@
+@use '../../../shared/styles/line-clamp' as lineClamp;
+
 .dialog {
     background-color: var(--spectrum-gray-100);
-    background-image: url('./../../../assets/background.png');
+    background-image: url('./../../../assets/background.webp');
     background-blend-mode: luminosity;
     background-position: center;
     background-repeat: no-repeat;
@@ -23,8 +25,14 @@
     margin-bottom: var(--spectrum-global-dimension-font-size-1000);
 }
 
+.content {
+    padding: var(--spectrum-global-dimension-size-500);
+}
+
 .card {
-    border: var(--spectrum-global-dimension-size-25) solid var(--spectrum-global-color-gray-200);
+    --border-size: var(--spectrum-global-dimension-size-25);
+
+    border: var(--border-size) solid var(--spectrum-global-color-gray-200);
     border-radius: var(--spectrum-global-dimension-size-50);
     background-color: var(--spectrum-global-color-gray-50);
     height: 100%;
@@ -32,37 +40,55 @@
         background-color,
         border 0.2s ease-in-out;
 
-    img {
-        height: 100%;
-        width: var(--spectrum-global-dimension-size-2000);
-        object-fit: cover;
-    }
-
     &:hover {
         background-color: var(--spectrum-global-color-gray-100);
         border-color: var(--energy-blue);
     }
 }
 
+.thumbnail {
+    object-fit: cover;
+    display: block;
+    height: 100%;
+    width: 100%;
+}
+
+.thumbnailError {
+    scale: 0.5;
+}
+
 .activeCard {
     border-color: var(--energy-blue);
+    background-color: var(--selection-dark-blue);
+    transition: background-color 0.2s ease-in-out;
 
-    h3 {
+    &:hover {
+        background-color: hsl(from var(--selection-dark-blue) h s calc(l + 5));
+    }
+
+    h2 {
         color: var(--energy-blue);
     }
 }
 
 .tag {
-    width: fit-content;
-    color: var(--spectrum-gray-50);
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--spectrum-global-color-gray-800);
-    padding: var(--spectrum-global-dimension-size-25);
-    border-radius: var(--spectrum-global-dimension-size-50);
+    background-color: var(--spectrum-global-color-gray-200);
+    color: var(--spectrum-global-color-gray-900);
 }
 
 .activeTag {
     color: var(--spectrum-gray-50);
-
     background-color: var(--energy-blue) !important;
+}
+
+.projectName {
+    @include lineClamp.clamp(1);
+}
+
+.labelList {
+    @include lineClamp.clamp(2);
+}
+
+.projectCreationDate {
+    font-size: var(--spectrum-global-dimension-font-size-75);
 }

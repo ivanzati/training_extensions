@@ -5,8 +5,8 @@ from copy import deepcopy
 
 import pytest
 
-from otx.config.data import TileConfig
-from otx.types.export import TaskLevelExportParameters
+from getitune.config.data import TileConfig
+from getitune.types.export import TaskLevelExportParameters
 
 
 @pytest.mark.parametrize("task_type", ["instance_segmentation", "classification"])
@@ -58,7 +58,7 @@ def test_wrap(fxt_label_info, task_type):
     assert ("model_info", "max_pred_number") in metadata
 
     # misc
-    assert ("model_info", "otx_version") in metadata
+    assert ("model_info", "getitune_version") in metadata
     assert ("model_info", "model_name") in metadata
 
 

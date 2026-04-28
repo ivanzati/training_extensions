@@ -12,9 +12,8 @@ from urllib.parse import urlparse
 
 import pytest
 from cpuinfo import get_cpu_info
-from otx import __version__
+from getitune import __version__
 
-import mlflow
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +77,7 @@ def fxt_mlflow_experiment_name(fxt_user_name) -> str:
     """
     tz = timezone(offset=timedelta(hours=9), name="Seoul")
     date = datetime.now(tz=tz).date()
-    return f"OTX: {__version__}, Signed-off-by: {fxt_user_name}, Date: {date}"
+    return f"getitune: {__version__}, Signed-off-by: {fxt_user_name}, Date: {date}"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -107,6 +106,8 @@ def fxt_mlflow_experiment(
     If there is a MLFlow Experiment which has the same name with the given name,
     it will use that MLFlow Experiment. Otherwise, it will create a new one and use it.
     """
+    import mlflow
+
     mlflow.set_tracking_uri(fxt_mlflow_tracking_uri)
     exp = mlflow.get_experiment_by_name(name=fxt_mlflow_experiment_name)
     exp_id = (
@@ -122,7 +123,7 @@ def fxt_mlflow_experiment(
 
 @pytest.fixture(scope="module", autouse=True)
 def fxt_recipe_dir() -> Path:
-    """OTX recipe directory."""
-    import otx.recipe as otx_recipe
+    """getitune recipe directory."""
+    import getitune.recipe as getitune_recipe
 
-    return Path(otx_recipe.__file__).parent
+    return Path(getitune_recipe.__file__).parent

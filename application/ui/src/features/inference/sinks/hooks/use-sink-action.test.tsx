@@ -3,22 +3,14 @@
 
 import { startTransition } from 'react';
 
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import { HttpResponse } from 'msw';
-import { screen, TestProviders } from 'test-utils/render';
+import { renderHook } from 'test-utils/render';
 
 import { http } from '../../../../api/utils';
 import { server } from '../../../../msw-node-setup';
 import { LocalFolderSinkConfig, SinkOutputFormats } from '../utils';
 import { useSinkAction } from './use-sink-action.hook';
-
-vi.mock('react-router', async (importOriginal) => {
-    const actual = await importOriginal<typeof import('react-router')>();
-    return {
-        ...actual,
-        useParams: vi.fn(() => ({ projectId: '123' })),
-    };
-});
 
 const mockedConfig: LocalFolderSinkConfig = {
     id: '1',
@@ -26,14 +18,17 @@ const mockedConfig: LocalFolderSinkConfig = {
     output_formats: [],
     sink_type: 'folder',
     folder_path: '',
-    rate_limit: 0,
+    rate_limit: null,
 };
 
 const bodyFormatter = (formData: FormData) => ({
     id: String(formData.get('id')),
     name: String(formData.get('name')),
     sink_type: 'folder' as const,
-    rate_limit: formData.get('rate_limit') ? Number(formData.get('rate_limit')) : 0,
+    rate_limit:
+        formData.get('rate_limit_samples') && formData.get('rate_limit_seconds')
+            ? Number(formData.get('rate_limit_samples')) / Number(formData.get('rate_limit_seconds'))
+            : null,
     folder_path: String(formData.get('folder_path')),
     output_formats: formData.getAll('output_formats') as SinkOutputFormats,
 });
@@ -47,18 +42,27 @@ const renderApp = async ({
     server.use(
         http.post('/api/sinks', newSink),
         http.patch('/api/sinks/{sink_id}', updateSink),
-        http.patch('/api/projects/{project_id}/pipeline', () => HttpResponse.json({}))
+        http.patch('/api/projects/{project_id}/pipeline', () =>
+            HttpResponse.json({
+                project_id: '',
+                status: 'idle',
+                device: 'images_folder',
+            })
+        )
     );
 
-    const { result } = renderHook(() => useSinkAction({ config: mockedConfig, isNewSink, bodyFormatter }), {
-        wrapper: TestProviders,
-    });
+    const { result } = renderHook(() => useSinkAction({ config: mockedConfig, isNewSink, bodyFormatter }));
     const [_state, submitAction] = result.current;
 
     const formData = new FormData();
     formData.append('name', config.name);
     formData.append('sink_type', config.sink_type);
-    formData.append('rate_limit', String(config.rate_limit));
+
+    if (config.rate_limit !== null && config.rate_limit !== undefined) {
+        formData.append('rate_limit_samples', String(config.rate_limit));
+        formData.append('rate_limit_seconds', '1');
+    }
+
     formData.append('folder_path', config.folder_path);
     formData.append('output_formats', config.output_formats.join(','));
 
@@ -73,9 +77,7 @@ const renderApp = async ({
 
 describe('useSinkAction', () => {
     it('return initial config', () => {
-        const { result } = renderHook(() => useSinkAction({ config: mockedConfig, isNewSink: true, bodyFormatter }), {
-            wrapper: TestProviders,
-        });
+        const { result } = renderHook(() => useSinkAction({ config: mockedConfig, isNewSink: true, bodyFormatter }));
 
         expect(result.current[0]).toEqual(mockedConfig);
     });

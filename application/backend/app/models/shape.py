@@ -6,16 +6,11 @@ from pydantic import BaseModel, Field
 
 
 class Point(BaseModel):
-    x: int = Field(..., description="Point x coordinate", ge=0)
-    y: int = Field(..., description="Point y coordinate", ge=0)
+    x: float = Field(..., description="Point x coordinate", ge=0)
+    y: float = Field(..., description="Point y coordinate", ge=0)
 
 
-# Base class with discriminator field
-class ShapeBase(BaseModel):
-    type: str
-
-
-class Rectangle(ShapeBase):
+class Rectangle(BaseModel):
     type: Literal["rectangle"] = "rectangle"
     x: int = Field(..., description="Rectangle x coordinate", ge=0)
     y: int = Field(..., description="Rectangle y coordinate", ge=0)
@@ -27,14 +22,16 @@ class Rectangle(ShapeBase):
     }
 
 
-class Polygon(ShapeBase):
+class Polygon(BaseModel):
     type: Literal["polygon"] = "polygon"
     points: list[Point] = Field(..., description="Polygon points")
 
-    model_config = {"json_schema_extra": {"example": {"type": "polygon", "points": [[10, 20], [20, 60], [30, 40]]}}}
+    model_config = {
+        "json_schema_extra": {"example": {"type": "polygon", "points": [[10.2, 20.2], [20.2, 60.6], [30.3, 40.4]]}}
+    }
 
 
-class FullImage(ShapeBase):
+class FullImage(BaseModel):
     type: Literal["full_image"] = "full_image"
 
     model_config = {

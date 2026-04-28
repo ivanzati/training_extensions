@@ -1,0 +1,50 @@
+// Copyright (C) 2025 Intel Corporation
+// SPDX-License-Identifier: Apache-2.0
+
+import { Flex, Grid, Text, useNumberFormatter, View } from '@geti/ui';
+
+import classes from './three-section-range.module.scss';
+
+type ThreeSectionRangeProps = {
+    id?: string;
+    trainingValue: number;
+    validationValue: number;
+    testingValue: number;
+};
+
+export const ThreeSectionRange = ({ id, trainingValue, validationValue, testingValue }: ThreeSectionRangeProps) => {
+    const formatter = useNumberFormatter({ style: 'percent', maximumFractionDigits: 0 });
+    const total = trainingValue + validationValue + testingValue;
+    const gridColumns = [
+        trainingValue > 0 ? `${trainingValue}fr` : '1fr',
+        validationValue > 0 ? `${validationValue}fr` : '1fr',
+        testingValue > 0 ? `${testingValue}fr` : '1fr',
+    ];
+
+    return (
+        <Flex alignItems={'center'} width={'100%'} data-testid={id}>
+            <Text UNSAFE_className={classes.label}>TRAINING SUBSETS</Text>
+
+            <Grid
+                columns={gridColumns}
+                width='100%'
+                height={'size-100'}
+                marginStart={'size-200'}
+                marginEnd={'size-50'}
+                UNSAFE_className={classes.rangeGrid}
+            >
+                {trainingValue > 0 && <View height='100%' UNSAFE_style={{ backgroundColor: 'var(--moss-tint-1)' }} />}
+                {validationValue > 0 && (
+                    <View height='100%' UNSAFE_style={{ backgroundColor: 'var(--brand-daisy-tint)' }} />
+                )}
+                {testingValue > 0 && <View height='100%' UNSAFE_style={{ backgroundColor: 'var(--geode-tint)' }} />}
+            </Grid>
+
+            <Text UNSAFE_className={classes.label}>
+                {[trainingValue, validationValue, testingValue]
+                    .map((value) => formatter.format(value / total))
+                    .join(' / ')}
+            </Text>
+        </Flex>
+    );
+};

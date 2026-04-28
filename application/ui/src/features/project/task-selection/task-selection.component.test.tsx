@@ -1,9 +1,10 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { fireEvent, render, screen } from 'test-utils/render';
+import { fireEvent, screen } from '@testing-library/react';
+import { render } from 'test-utils/render';
 
-import type { TaskType } from './interface';
+import type { TaskType } from '../../../constants/shared-types';
 import { TaskSelection } from './task-selection.component';
 
 describe('TaskSelection', () => {
@@ -17,6 +18,10 @@ describe('TaskSelection', () => {
         expect(screen.getByLabelText('Task option: Object Detection')).toBeInTheDocument();
         expect(screen.getByLabelText('Task option: Image Segmentation')).toBeInTheDocument();
         expect(screen.getByLabelText('Task option: Image Classification')).toBeInTheDocument();
+
+        expect(screen.getByText('Best for: Counting, Tracking')).toBeInTheDocument();
+        expect(screen.getByText('Best for: Measurement, Odd shapes')).toBeInTheDocument();
+        expect(screen.getByText('Best for: Filtering, Content Moderation')).toBeInTheDocument();
     });
 
     it('selects the first task by default', () => {

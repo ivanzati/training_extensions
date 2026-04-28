@@ -7,10 +7,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
-from tests.utils import run_main
 import mlflow
 import pandas as pd
+import pytest
+
+from tests.utils import run_main
 
 
 @dataclass
@@ -23,7 +24,6 @@ class ModelTestCase:
 class DatasetTestCase:
     name: str
     data_root: Path
-    data_format: str
     num_classes: int
     extra_overrides: dict
 
@@ -68,16 +68,14 @@ class BaseTest:
             )
             with mlflow.start_run(tags=tags, run_name=run_name):
                 command_cfg = [
-                    "otx",
+                    "getitune",
                     "train",
                     "--config",
-                    f"src/otx/recipe/{test_case.model.task}/{test_case.model.name}.yaml",
+                    f"src/getitune/recipe/{test_case.model.task}/{test_case.model.name}.yaml",
                     "--model.num_classes",
                     str(test_case.dataset.num_classes),
                     "--data_root",
                     str(data_root),
-                    "--data.data_format",
-                    test_case.dataset.data_format,
                     "--work_dir",
                     str(test_case.output_dir),
                     "--engine.device",
@@ -105,7 +103,7 @@ class BaseTest:
 
                 # This is also not working. It produces an empty dictionary for test_metrics = {}
                 # with patch("sys.argv", test_cfg):
-                #     cli = OTXCLI()
+                #     cli = CLI()
                 #     test_metrics = cli.engine.trainer.callback_metrics
                 # mlflow.log_metrics(test_metrics)
 
@@ -121,7 +119,7 @@ class BaseTest:
             for _, row in sub_df.iterrows():
                 row = row.dropna()
                 metrics = row.to_dict()
-                mlflow.log_metrics(metrics=metrics, step=step)
+                mlflow.log_metrics(metrics=metrics, step=step)  # pyrefly: ignore[bad-argument-type]
 
         mlflow.log_artifact(local_path=str(metric_csv_file), artifact_path="metrics")
 
@@ -129,7 +127,7 @@ class BaseTest:
 class TestMultiClassCls(BaseTest):
     # Test case parametrization for model
     MODEL_TEST_CASES = [  # noqa: RUF012
-        ModelTestCase(task="classification/multi_class_cls", name="deit_tiny"),
+        ModelTestCase(task="classification/multi_class_cls", name="vit_tiny"),
         ModelTestCase(task="classification/multi_class_cls", name="dino_v2"),
         ModelTestCase(task="classification/multi_class_cls", name="efficientnet_b0"),
         ModelTestCase(task="classification/multi_class_cls", name="efficientnet_v2"),
@@ -140,33 +138,30 @@ class TestMultiClassCls(BaseTest):
         DatasetTestCase(
             name=f"multiclass_CUB_small_{idx}",
             data_root=Path("multiclass_classification/multiclass_CUB_small") / f"{idx}",
-            data_format="imagenet_with_subset_dirs",
             num_classes=2,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.accuracy.MulticlassAccuracywithLabelGroup",
+                "metric": "getitune.metrics.accuracy.MulticlassAccuracywithLabelGroup",
             },
         )
         for idx in range(1, 4)
     ] + [
         DatasetTestCase(
-            name=f"multiclass_CUB_medium",
+            name="multiclass_CUB_medium",
             data_root=Path("multiclass_classification/multiclass_CUB_medium"),
-            data_format="imagenet_with_subset_dirs",
             num_classes=67,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.accuracy.MulticlassAccuracywithLabelGroup",
+                "metric": "getitune.metrics.accuracy.MulticlassAccuracywithLabelGroup",
             },
         ),
         DatasetTestCase(
-            name=f"multiclass_food101_large",
+            name="multiclass_food101_large",
             data_root=Path("multiclass_classification/multiclass_food101_large"),
-            data_format="imagenet_with_subset_dirs",
             num_classes=20,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.accuracy.MulticlassAccuracywithLabelGroup",
+                "metric": "getitune.metrics.accuracy.MulticlassAccuracywithLabelGroup",
             },
         ),
     ]
@@ -208,40 +203,37 @@ class TestMultilabelCls(BaseTest):
         ModelTestCase(task="classification/multi_label_cls", name="efficientnet_b0"),
         ModelTestCase(task="classification/multi_label_cls", name="efficientnet_v2"),
         ModelTestCase(task="classification/multi_label_cls", name="mobilenet_v3_large"),
-        ModelTestCase(task="classification/multi_label_cls", name="deit_tiny"),
+        ModelTestCase(task="classification/multi_label_cls", name="vit_tiny"),
     ]
     # Test case parametrization for dataset
     DATASET_TEST_CASES = [  # noqa: RUF012
         DatasetTestCase(
             name=f"multilabel_CUB_small_{idx}",
             data_root=Path("multilabel_classification/multilabel_CUB_small") / f"{idx}",
-            data_format="datumaro",
             num_classes=3,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.accuracy.MultilabelAccuracywithLabelGroup",
+                "metric": "getitune.metrics.accuracy.MultilabelAccuracywithLabelGroup",
             },
         )
         for idx in range(1, 4)
     ] + [
         DatasetTestCase(
-            name=f"multilabel_CUB_medium",
+            name="multilabel_CUB_medium",
             data_root=Path("multilabel_classification/multilabel_CUB_medium"),
-            data_format="datumaro",
             num_classes=68,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.accuracy.MultilabelAccuracywithLabelGroup",
+                "metric": "getitune.metrics.accuracy.MultilabelAccuracywithLabelGroup",
             },
         ),
         DatasetTestCase(
-            name=f"multilabel_food101_large",
+            name="multilabel_food101_large",
             data_root=Path("multilabel_classification/multilabel_food101_large"),
-            data_format="datumaro",
             num_classes=21,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.accuracy.MultilabelAccuracywithLabelGroup",
+                "metric": "getitune.metrics.accuracy.MultilabelAccuracywithLabelGroup",
             },
         ),
     ]
@@ -283,30 +275,28 @@ class TestHlabelCls(BaseTest):
         ModelTestCase(task="classification/h_label_cls", name="efficientnet_b0"),
         ModelTestCase(task="classification/h_label_cls", name="efficientnet_v2"),
         ModelTestCase(task="classification/h_label_cls", name="mobilenet_v3_large"),
-        ModelTestCase(task="classification/h_label_cls", name="deit_tiny"),
+        ModelTestCase(task="classification/h_label_cls", name="vit_tiny"),
     ]
     # Test case parametrization for dataset
     DATASET_TEST_CASES = [  # noqa: RUF012
         DatasetTestCase(
             name=f"hlabel_CUB_small_{idx}",
             data_root=Path("hlabel_classification/hlabel_CUB_small") / f"{idx}",
-            data_format="datumaro",
             num_classes=6,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.accuracy.HlabelAccuracy",
+                "metric": "getitune.metrics.accuracy.HlabelAccuracy",
             },
         )
         for idx in range(1, 4)
     ] + [
         DatasetTestCase(
-            name=f"hlabel_CUB_medium",
+            name="hlabel_CUB_medium",
             data_root=Path("hlabel_classification/hlabel_CUB_medium"),
-            data_format="datumaro",
             num_classes=102,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.accuracy.HlabelAccuracy",
+                "metric": "getitune.metrics.accuracy.HlabelAccuracy",
             },
         )
     ]
@@ -346,7 +336,6 @@ class TestObjectDetection(BaseTest):
     # Test case parametrization for model
     MODEL_TEST_CASES = [  # noqa: RUF012
         ModelTestCase(task="detection", name="atss_mobilenetv2"),
-        ModelTestCase(task="detection", name="atss_resnext101"),
         ModelTestCase(task="detection", name="ssd_mobilenetv2"),
         ModelTestCase(task="detection", name="yolox_tiny"),
         ModelTestCase(task="detection", name="yolox_s"),
@@ -358,11 +347,10 @@ class TestObjectDetection(BaseTest):
         DatasetTestCase(
             name=f"pothole_small_{idx}",
             data_root=Path("detection/pothole_small") / f"{idx}",
-            data_format="coco",
             num_classes=1,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -372,11 +360,10 @@ class TestObjectDetection(BaseTest):
         DatasetTestCase(
             name="pothole_medium",
             data_root=Path("detection/pothole_medium"),
-            data_format="coco",
             num_classes=1,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -384,11 +371,10 @@ class TestObjectDetection(BaseTest):
         DatasetTestCase(
             name="vitens_large",
             data_root=Path("detection/vitens_large"),
-            data_format="coco",
             num_classes=1,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -442,7 +428,6 @@ class TestSemanticSegmentation(BaseTest):
         DatasetTestCase(
             name=f"kvasir_small_{idx}",
             data_root=Path("semantic_seg/kvasir_small") / f"{idx}",
-            data_format="common_semantic_segmentation_with_subset_dirs",
             num_classes=2,
             extra_overrides={},
         )
@@ -451,14 +436,12 @@ class TestSemanticSegmentation(BaseTest):
         DatasetTestCase(
             name="kvasir_medium",
             data_root=Path("semantic_seg/kvasir_medium"),
-            data_format="common_semantic_segmentation_with_subset_dirs",
             num_classes=2,
             extra_overrides={},
         ),
         DatasetTestCase(
             name="kvasir_large",
             data_root=Path("semantic_seg/kvasir_large"),
-            data_format="common_semantic_segmentation_with_subset_dirs",
             num_classes=2,
             extra_overrides={},
         ),
@@ -507,11 +490,10 @@ class TestInstanceSegmentation(BaseTest):
         DatasetTestCase(
             name=f"wgisd_small_{idx}",
             data_root=Path("instance_seg/wgisd_small") / f"{idx}",
-            data_format="coco",
             num_classes=5,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -521,11 +503,10 @@ class TestInstanceSegmentation(BaseTest):
         DatasetTestCase(
             name="coco_car_person_medium",
             data_root=Path("instance_seg/coco_car_person_medium"),
-            data_format="coco",
             num_classes=2,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -533,11 +514,10 @@ class TestInstanceSegmentation(BaseTest):
         DatasetTestCase(
             name="vitens_coliform",
             data_root=Path("instance_seg/Vitens-Coliform-coco"),
-            data_format="coco",
             num_classes=1,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -586,15 +566,14 @@ class TestTileObjectDetection(BaseTest):
         ModelTestCase(task="detection", name="yolox_x_tile"),
     ]
     # Test case parametrization for dataset
-    DATASET_TEST_CASES = [
+    DATASET_TEST_CASES = [  # noqa: RUF012
         DatasetTestCase(
             name="vitens_coliform",
             data_root=Path("instance_seg/Vitens-Coliform-coco"),
-            data_format="coco",
             num_classes=1,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -602,11 +581,10 @@ class TestTileObjectDetection(BaseTest):
         DatasetTestCase(
             name="vitens_aeromonas",
             data_root=Path("instance_seg/Vitens-Aeromonas-coco"),
-            data_format="coco",
             num_classes=1,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -652,15 +630,14 @@ class TestTileInstanceSegmentation(BaseTest):
         ModelTestCase(task="instance_segmentation", name="maskrcnn_swint_tile"),
     ]
     # Test case parametrization for dataset
-    DATASET_TEST_CASES = [
+    DATASET_TEST_CASES = [  # noqa: RUF012
         DatasetTestCase(
             name="vitens_coliform",
             data_root=Path("instance_seg/Vitens-Coliform-coco"),
-            data_format="coco",
             num_classes=1,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },
@@ -668,11 +645,10 @@ class TestTileInstanceSegmentation(BaseTest):
         DatasetTestCase(
             name="vitens_aeromonas",
             data_root=Path("instance_seg/Vitens-Aeromonas-coco"),
-            data_format="coco",
             num_classes=1,
             extra_overrides={
                 "deterministic": "True",
-                "metric": "otx.metrics.fmeasure.FMeasureCallable",
+                "metric": "getitune.metrics.fmeasure.FMeasureCallable",
                 "callback_monitor": "val/f1-score",
                 "scheduler.monitor": "val/f1-score",
             },

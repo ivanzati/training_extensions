@@ -1,11 +1,11 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { IPCameraSourceConfig } from '../util';
+import type { IPCameraSourceConfig } from '../../../../constants/shared-types';
 
 export const getIpCameraInitialConfig = (): IPCameraSourceConfig => ({
     id: '',
-    name: '',
+    name: 'IP camera source',
     source_type: 'ip_camera',
     stream_url: '',
     auth_required: false,

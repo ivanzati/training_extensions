@@ -1,85 +1,134 @@
-// Copyright (C) 2025 Intel Corporation
+// Copyright (C) 2025-2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { Suspense, useState } from 'react';
-
-import { Button, ButtonGroup, Content, Dialog, DialogContainer, Divider, Heading, Loading, Text, View } from '@geti/ui';
+import {
+    Button,
+    ButtonGroup,
+    Content,
+    Dialog,
+    Divider,
+    Flex,
+    Footer,
+    Heading,
+    InlineAlert,
+    Link,
+    Text,
+    toast,
+} from '@geti/ui';
 import { useProjectIdentifier } from 'hooks/use-project-identifier.hook';
-import { isEmpty } from 'lodash-es';
+import { useMatch } from 'react-router';
 
-import { $api } from '../../../api/client';
-import { ModelTypesList } from './model-types-list/model-types-list.component';
+import { paths } from '../../../constants/paths';
+import { AdvancedSettings } from './advanced-settings/advanced-settings.component';
+import { BasicTrainModelContent } from './basic-train-model-content.component';
+import { useTrainModel } from './hooks/use-train-model';
+import { useTrainModelDisabledReason } from './hooks/use-train-model-disabled-reason';
+import { TrainModelDialogLayout } from './train-model-dialog-layout.component';
+import { useTrainModelState } from './train-model-provider.component';
 
-import classes from './train-model-dialog.module.scss';
-
-interface TrainModelDialogProps {
-    isOpen: boolean;
+type TrainModelDialogProps = {
     onClose: () => void;
-}
+};
 
-export const TrainModelDialog = ({ isOpen, onClose }: TrainModelDialogProps) => {
-    const project_id = useProjectIdentifier();
-    const [selectedModelArchitectureId, setSelectedModelArchitectureId] = useState<string | null>(null);
-    const jobMutation = $api.useMutation('post', '/api/jobs');
+export const TrainModelDialog = ({ onClose }: TrainModelDialogProps) => {
+    const {
+        selectedTrainingDevice,
+        selectedModelArchitectureId,
+        isAdvancedSettingsMode,
+        onToggleAdvancedSettingsMode,
+        trainingConfiguration,
+    } = useTrainModelState();
+    const projectId = useProjectIdentifier();
+    const isModelsPage = useMatch(paths.project.models.pattern);
+    const trainingDisabledReason = useTrainModelDisabledReason().reason;
+    const isTrainingDisabled = trainingDisabledReason !== undefined;
 
-    const handleSubmit = async () => {
-        await jobMutation.mutateAsync({
-            body: {
-                job_type: 'train',
-                project_id,
-                parameters: {
-                    // TODO: device is hardcoded for now but once we have the train model designs updated
-                    // we will have a dropdown to pick this device so this needs to be updated
-                    device: 'cpu',
-                    model_architecture_id: String(selectedModelArchitectureId),
-                },
+    const { trainModel, isPending } = useTrainModel();
+
+    const isStartButtonDisabled =
+        isTrainingDisabled || selectedModelArchitectureId === null || selectedTrainingDevice === null || isPending;
+
+    const isAdvancedSettingsModeDisabled = selectedModelArchitectureId === null || trainingConfiguration === undefined;
+
+    const handleTrainModel = () => {
+        trainModel({
+            onSuccess: () => {
+                onClose();
+
+                toast({
+                    message: isModelsPage ? (
+                        <Text>Model training started successfully.</Text>
+                    ) : (
+                        <Flex alignItems={'center'} gap={'size-50'} wrap={'wrap'}>
+                            <Text>
+                                Model training started successfully.{' '}
+                                <Link href={paths.project.models({ projectId })} UNSAFE_style={{ color: '#fff' }}>
+                                    Open models screen to see progress.
+                                </Link>
+                            </Text>
+                        </Flex>
+                    ),
+                    type: 'success',
+                });
             },
         });
-        onClose();
     };
 
     return (
-        <DialogContainer onDismiss={onClose}>
-            {isOpen && (
-                <Dialog maxWidth={'100rem'} width={'80vw'}>
-                    <Heading>
-                        <Text UNSAFE_className={classes.title}>Train model</Text>
-                    </Heading>
-                    <Divider marginBottom={'size-100'} />
-                    <Content minHeight={'size-1000'}>
-                        <View
-                            flex={1}
-                            padding={'size-250'}
-                            minHeight={0}
-                            backgroundColor={'gray-50'}
-                            overflow={'hidden auto'}
-                        >
-                            <Text UNSAFE_className={classes.subtitle} marginBottom={'size-100'}>
-                                Model type
-                            </Text>
-                            <Suspense fallback={<Loading mode='inline' />}>
-                                <ModelTypesList
-                                    selectedModelArchitectureId={selectedModelArchitectureId}
-                                    setSelectedModelArchitectureId={setSelectedModelArchitectureId}
-                                />
-                            </Suspense>
-                        </View>
-                    </Content>
-                    <ButtonGroup>
-                        <Button variant={'secondary'} onPress={onClose}>
-                            Cancel
-                        </Button>
+        <Dialog width={'clamp(800px, 50vw, 1150px)'} height={isAdvancedSettingsMode ? '80vh' : undefined}>
+            <Heading>Select a model to train</Heading>
+
+            <Divider size={'S'} />
+
+            <Content>
+                <TrainModelDialogLayout>
+                    {isAdvancedSettingsMode ? <AdvancedSettings /> : <BasicTrainModelContent />}
+                </TrainModelDialogLayout>
+            </Content>
+
+            <Divider size={'S'} />
+
+            <Footer>
+                <Flex alignItems={'center'} marginBottom={'size-200'}>
+                    {isTrainingDisabled ? (
+                        <InlineAlert variant={'notice'}>
+                            <Heading>Why can I not start training?</Heading>
+                            <Content>{trainingDisabledReason}</Content>
+                        </InlineAlert>
+                    ) : null}
+                </Flex>
+
+                <ButtonGroup marginStart={'auto'}>
+                    <Button variant={'secondary'} onPress={onClose}>
+                        Cancel
+                    </Button>
+                    {isAdvancedSettingsMode ? (
                         <Button
-                            variant={'accent'}
-                            onPress={handleSubmit}
-                            isPending={jobMutation.isPending}
-                            isDisabled={isEmpty(selectedModelArchitectureId) || jobMutation.isPending}
+                            variant={'primary'}
+                            onPress={() => onToggleAdvancedSettingsMode(!isAdvancedSettingsMode)}
                         >
-                            Start
+                            Back
                         </Button>
-                    </ButtonGroup>
-                </Dialog>
-            )}
-        </DialogContainer>
+                    ) : (
+                        <Button
+                            variant={'primary'}
+                            isDisabled={isAdvancedSettingsModeDisabled}
+                            onPress={() => onToggleAdvancedSettingsMode(!isAdvancedSettingsMode)}
+                        >
+                            Advanced settings
+                        </Button>
+                    )}
+
+                    <Button
+                        variant={'accent'}
+                        onPress={handleTrainModel}
+                        isDisabled={isStartButtonDisabled}
+                        isPending={isPending}
+                    >
+                        Start
+                    </Button>
+                </ButtonGroup>
+            </Footer>
+        </Dialog>
     );
 };

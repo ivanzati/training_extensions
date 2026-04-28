@@ -1,30 +1,42 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { useSuspenseQuery, UseSuspenseQueryResult } from '@tanstack/react-query';
+import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
 import { useProjectIdentifier } from 'hooks/use-project-identifier.hook';
 
-import { API_BASE_URL } from '../../../api/client';
-import type { DatasetItem } from '../../../constants/shared-types';
+import { Media } from '../../../constants/shared-types';
+import { isVideoFrame } from '../../../shared/media-item-utils';
+import { getMediaBinaryUrl, getVideoFrameBinaryUrl } from '../../../shared/media-url.utils';
+import { getImageDataFromTiffUrl, isTiffFormat } from '../../../shared/media-utils';
 import { getImageData, loadImage } from '../tools/utils';
 
-export const useLoadImageQuery = (mediaItem: DatasetItem | undefined): UseSuspenseQueryResult<ImageData, unknown> => {
-    const projectId = useProjectIdentifier();
-
-    return useSuspenseQuery({
-        queryKey: ['mediaItem', mediaItem?.id, projectId],
+export const loadImageQueryOptions = (projectId: string, media: Media) =>
+    queryOptions({
+        queryKey: isVideoFrame(media)
+            ? ['mediaItem', projectId, media.id, media.frame_number]
+            : ['mediaItem', projectId, media.id],
         queryFn: async () => {
-            if (mediaItem === undefined) {
-                throw new Error("Can't fetch undefined media item");
+            const url = isVideoFrame(media)
+                ? getVideoFrameBinaryUrl(projectId, media.id, media.frame_number)
+                : getMediaBinaryUrl(projectId, media.id);
+
+            if (isTiffFormat(media)) {
+                return getImageDataFromTiffUrl(url);
             }
 
-            const imageUrl = `${API_BASE_URL}/api/projects/${projectId}/dataset/items/${mediaItem.id}/binary`;
-            const image = await loadImage(imageUrl);
+            const image = await loadImage(url);
 
             return getImageData(image);
         },
-        // The image of a media item never changes so we don't want to refetch stale data
         staleTime: Infinity,
         retry: 0,
+    });
+
+export const useLoadImageQuery = (media: Media) => {
+    const projectId = useProjectIdentifier();
+
+    return useQuery({
+        ...loadImageQueryOptions(projectId, media),
+        placeholderData: keepPreviousData,
     });
 };

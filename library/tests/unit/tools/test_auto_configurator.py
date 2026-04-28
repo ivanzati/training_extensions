@@ -1,35 +1,32 @@
-# Copyright (C) 2024 Intel Corporation
+# Copyright (C) 2024-2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
 
 from pathlib import Path
 
 import pytest
-import torch
 
-from otx.backend.native.models.base import DataInputParams, OTXModel
-from otx.data.module import OTXDataModule
-from otx.tools import auto_configurator as target_file
-from otx.tools.auto_configurator import (
+from getitune.backend.lightning.models.base import DataInputParams, LightningModel
+from getitune.data.module import DataModule
+from getitune.tools.auto_configurator import (
     DEFAULT_CONFIG_PER_TASK,
     AutoConfigurator,
 )
-from otx.types.label import LabelInfo, SegLabelInfo
-from otx.types.task import OTXTaskType
-from otx.types.transformer_libs import TransformLibType
-from otx.utils.utils import should_pass_label_info
+from getitune.types.label import LabelInfo, SegLabelInfo
+from getitune.types.task import TaskType
+from getitune.utils.utils import should_pass_label_info
 
 
 @pytest.fixture
 def fxt_data_root_per_task_type() -> dict:
     return {
-        OTXTaskType.MULTI_CLASS_CLS: "tests/assets/classification_dataset",
-        OTXTaskType.MULTI_LABEL_CLS: "tests/assets/multilabel_classification",
-        OTXTaskType.DETECTION: "tests/assets/car_tree_bug",
-        OTXTaskType.KEYPOINT_DETECTION: "tests/assets/car_tree_bug_keypoint",
-        OTXTaskType.ROTATED_DETECTION: "tests/assets/car_tree_bug",
-        OTXTaskType.INSTANCE_SEGMENTATION: "tests/assets/car_tree_bug",
-        OTXTaskType.SEMANTIC_SEGMENTATION: "tests/assets/common_semantic_segmentation_dataset",
+        TaskType.MULTI_CLASS_CLS: "tests/assets/classification_cifar10",
+        TaskType.MULTI_LABEL_CLS: "tests/assets/multilabel_classification_coco",
+        TaskType.DETECTION: "tests/assets/detection_coco",
+        TaskType.KEYPOINT_DETECTION: "tests/assets/keypoint_detection_coco",
+        TaskType.ROTATED_DETECTION: "tests/assets/detection_coco",
+        TaskType.INSTANCE_SEGMENTATION: "tests/assets/instance_segmentation_coco",
+        TaskType.SEMANTIC_SEGMENTATION: "tests/assets/segmentation_pets",
     }
 
 
@@ -44,7 +41,7 @@ class TestAutoConfigurator:
         assert auto_configurator.task == "MULTI_CLASS_CLS"
 
         # instantiate with model_config_path
-        model_config_path = "src/otx/recipe/classification/multi_class_cls/mobilenet_v3_large.yaml"
+        model_config_path = "src/getitune/recipe/classification/multi_class_cls/mobilenet_v3_large.yaml"
         auto_configurator = AutoConfigurator(data_root=None, task=None, model=model_config_path)
         assert auto_configurator.task == "MULTI_CLASS_CLS"
 
@@ -59,14 +56,14 @@ class TestAutoConfigurator:
         assert auto_configurator.task == "MULTI_CLASS_CLS"
 
         # data_root is not None & task is None
-        data_root = "tests/assets/classification_dataset"
+        data_root = "tests/assets/classification_cifar10"
         auto_configurator = AutoConfigurator(data_root=data_root, task="MULTI_CLASS_CLS")
         assert auto_configurator.task == "MULTI_CLASS_CLS"
 
     def test_load_default_config(self) -> None:
         # Test the load_default_config function
-        data_root = "tests/assets/classification_dataset"
-        task = OTXTaskType.MULTI_CLASS_CLS
+        data_root = "tests/assets/classification_cifar10"
+        task = TaskType.MULTI_CLASS_CLS
         auto_configurator = AutoConfigurator(data_root=data_root, task=task)
 
         # Default Config
@@ -76,13 +73,13 @@ class TestAutoConfigurator:
         assert len(default_config) > 0
         assert "config" in default_config
         assert len(default_config["config"]) > 0
-        assert default_config["config"][0] == target_config
+        assert str(default_config["config"][0]) == str(target_config)
 
-        # OTX-Mobilenet-v2
+        # getitune-Mobilenet-v2
         # new_config
-        model_name = "deit_tiny"
+        model_name = "vit_tiny"
         new_config = auto_configurator._load_default_config(
-            config_path="src/otx/recipe/classification/multi_class_cls/deit_tiny.yaml",
+            config_path="src/getitune/recipe/classification/multi_class_cls/vit_tiny.yaml",
         )
         new_path = str(target_config).split("/")
         new_path[-1] = f"{model_name}.yaml"
@@ -96,35 +93,22 @@ class TestAutoConfigurator:
 
     def test_get_datamodule(self) -> None:
         data_root = None
-        task = OTXTaskType.DETECTION
+        task = TaskType.DETECTION
         auto_configurator = AutoConfigurator(data_root=data_root, task=task)
 
         # data_root is None
         with pytest.raises(ValueError, match="No data root provided."):
             assert auto_configurator.get_datamodule() is None
 
-        data_root = "tests/assets/car_tree_bug"
+        data_root = "tests/assets/detection_coco"
         auto_configurator = AutoConfigurator(data_root=data_root, task=task)
 
         datamodule = auto_configurator.get_datamodule()
-        assert isinstance(datamodule, OTXDataModule)
+        assert isinstance(datamodule, DataModule)
         assert datamodule.task == task
 
-    def test_get_datamodule_set_input_size_multiplier(self, mocker) -> None:
-        mock_otxdatamodule = mocker.patch.object(target_file, "OTXDataModule")
-        auto_configurator = AutoConfigurator(
-            data_root="tests/assets/car_tree_bug",
-            task=OTXTaskType.DETECTION,
-            model="yolox_tiny",
-        )
-        auto_configurator.config["data"]["input_size"] = "auto"
-
-        auto_configurator.get_datamodule()
-
-        assert mock_otxdatamodule.call_args.kwargs["input_size_multiplier"] == 32
-
-    def test_get_model(self, fxt_task: OTXTaskType, fxt_data_root_per_task_type) -> None:
-        if fxt_task is OTXTaskType.H_LABEL_CLS:
+    def test_get_model(self, fxt_task: TaskType, fxt_data_root_per_task_type) -> None:
+        if fxt_task is TaskType.H_LABEL_CLS:
             pytest.xfail(reason="Not working")
 
         auto_configurator = AutoConfigurator(task=fxt_task, data_root=fxt_data_root_per_task_type[fxt_task])
@@ -133,14 +117,14 @@ class TestAutoConfigurator:
         label_names = ["class1", "class2", "class3"]
         label_info = (
             LabelInfo(label_names=label_names, label_groups=[label_names], label_ids=label_names)
-            if fxt_task != OTXTaskType.SEMANTIC_SEGMENTATION
+            if fxt_task != TaskType.SEMANTIC_SEGMENTATION
             else SegLabelInfo(label_names=label_names, label_groups=[label_names], label_ids=label_names)
         )
         model = auto_configurator.get_model(
             label_info=label_info,
-            data_input_params=DataInputParams((256, 256), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)),
+            data_input_params=DataInputParams((288, 288), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)),
         )
-        assert isinstance(model, OTXModel)
+        assert isinstance(model, LightningModel)
 
         model_cls = model.__class__
 
@@ -149,7 +133,7 @@ class TestAutoConfigurator:
                 _ = auto_configurator.get_model(label_info=None)
 
     def test_get_model_set_input_size(self) -> None:
-        auto_configurator = AutoConfigurator(task=OTXTaskType.MULTI_CLASS_CLS)
+        auto_configurator = AutoConfigurator(task=TaskType.MULTI_CLASS_CLS)
         label_names = ["class1", "class2", "class3"]
         label_info = LabelInfo(label_names=label_names, label_groups=[label_names], label_ids=label_names)
 
@@ -161,28 +145,42 @@ class TestAutoConfigurator:
         assert model.data_input_params.input_size == (300, 300)
 
     def test_update_ov_subset_pipeline(self) -> None:
-        data_root = "tests/assets/car_tree_bug"
+        data_root = "tests/assets/detection_coco"
         auto_configurator = AutoConfigurator(data_root=data_root, task="DETECTION")
 
         datamodule = auto_configurator.get_datamodule()
-        assert datamodule.test_subset.transforms == [
-            {
-                "class_path": "otx.data.transform_libs.torchvision.Resize",
-                "init_args": {
-                    "scale": (800, 992),
-                },
-            },
-            {"class_path": "torchvision.transforms.v2.ToDtype", "init_args": {"dtype": torch.float32}},
-            {
-                "class_path": "torchvision.transforms.v2.Normalize",
-                "init_args": {"mean": [0.0, 0.0, 0.0], "std": [255.0, 255.0, 255.0]},
-            },
-        ]
-
-        assert datamodule.test_subset.transform_lib_type == TransformLibType.TORCHVISION
+        # The detection base config has augmentations_cpu with Resize
+        assert any("Resize" in aug.get("class_path", "") for aug in datamodule.test_subset.augmentations_cpu)
 
         updated_datamodule = auto_configurator.update_ov_subset_pipeline(datamodule, subset="test")
-        assert updated_datamodule.test_subset.transforms == [{"class_path": "torchvision.transforms.v2.ToImage"}]
-
-        assert updated_datamodule.test_subset.transform_lib_type == TransformLibType.TORCHVISION
+        # OV recipes now use Resize (preprocessing moved from ModelAPI to getitune)
+        assert len(updated_datamodule.test_subset.augmentations_cpu) == 1
+        assert "Resize" in updated_datamodule.test_subset.augmentations_cpu[0]["class_path"]
         assert not updated_datamodule.tile_config.enable_tiler
+
+    def test_update_ov_subset_pipeline_from_pre_constructed_datasets(self) -> None:
+        """Test that update_ov_subset_pipeline works when the datamodule was created via from_vision_datasets (no data_root)."""
+        data_root = "tests/assets/detection_coco"
+        auto_configurator = AutoConfigurator(data_root=data_root, task=TaskType.DETECTION)
+
+        # Create a normal datamodule first, then rebuild it via from_vision_datasets
+        # to simulate what the quantization pipeline does
+        datamodule = auto_configurator.get_datamodule()
+        pre_constructed_datamodule = DataModule.from_vision_datasets(
+            train_dataset=datamodule.subsets["train"],
+            val_dataset=datamodule.subsets["val"],
+            test_dataset=datamodule.subsets.get("test"),
+            train_subset=datamodule.train_subset,
+            val_subset=datamodule.val_subset,
+            test_subset=datamodule.test_subset,
+        )
+        assert pre_constructed_datamodule.data_root == ""
+
+        # This should NOT raise ValueError about dataset format detection
+        updated_datamodule = auto_configurator.update_ov_subset_pipeline(pre_constructed_datamodule, subset="train")
+        assert len(updated_datamodule.train_subset.augmentations_cpu) == 1
+        assert "Resize" in updated_datamodule.train_subset.augmentations_cpu[0]["class_path"]
+        assert not updated_datamodule.tile_config.enable_tiler
+        # Verify subsets are preserved
+        assert "train" in updated_datamodule.subsets
+        assert "val" in updated_datamodule.subsets

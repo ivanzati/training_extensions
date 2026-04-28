@@ -1,16 +1,23 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
-
+import platform
 import re
 
+import cv2
 import psutil
 import torch
 from cv2_enumerate_cameras import enumerate_cameras
+from loguru import logger
 
 from app.models.system import CameraInfo, DeviceInfo, DeviceType
 
-DEVICE_PATTERN = re.compile(r"^(cpu|xpu|cuda)(-(\d+))?$")
+DEVICE_PATTERN = re.compile(r"^(auto|cpu|xpu|cuda)(-(\d+))?$")
 DEFAULT_DEVICE = "cpu"
+CV2_BACKENDS = {
+    "Windows": cv2.CAP_MSMF,
+    "Linux": cv2.CAP_V4L2,
+    "Darwin": cv2.CAP_AVFOUNDATION,
+}
 
 
 class SystemService:
@@ -100,15 +107,20 @@ class SystemService:
         Validate if a device string is available on the system.
 
         Args:
-            device_str: Device string in format '<target>[-<index>]' (e.g., 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')
+            device_str: Device string in format '<target>[-<index>]'
+                (e.g., 'auto', 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')
 
         Returns:
             bool: True if the device is available, False otherwise
         """
-        device_type, device_index = self._parse_device(device_str)
+        try:
+            device_type, device_index = self._parse_device(device_str)
+        except ValueError:
+            logger.debug("Cannot parse invalid device string: {}", device_str)
+            return False
 
         # CPU is always available
-        if device_type == DeviceType.CPU:
+        if device_type in [DeviceType.AUTO, DeviceType.CPU]:
             return True
 
         # Check if desired device is among available devices
@@ -124,7 +136,8 @@ class SystemService:
         Get DeviceInfo for a given device string.
 
         Args:
-            device_str: Device string in format '<target>[-<index>]' (e.g., 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')
+            device_str: Device string in format '<target>[-<index>]'
+                (e.g., 'auto', 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')
 
         Returns:
             DeviceInfo: Information about the specified device
@@ -135,9 +148,41 @@ class SystemService:
         device_type, device_index = self._parse_device(device_str)
         if device_type == DeviceType.CPU:
             return DeviceInfo(type=DeviceType.CPU, name="CPU", memory=None, index=None)
+        if device_type == DeviceType.AUTO:
+            return DeviceInfo(type=DeviceType.AUTO, name="AUTO", memory=None, index=None)
         return next(
             device for device in self.get_devices() if device.type == device_type and device.index == device_index
         )
+
+    def get_inference_device_info(self, device_str: str) -> DeviceInfo:
+        """
+        Get DeviceInfo for a given device string, ensuring it's valid for inference.
+
+        Args:
+            device_str: Device string in format '<target>[-<index>]'
+                (e.g., 'auto', 'cpu', 'xpu', 'xpu-2')
+
+        Returns:
+            DeviceInfo: Information about the specified inference device
+        """
+        device_info = self.get_device_info(device_str)
+        if device_info.type == DeviceType.CUDA:
+            raise ValueError(f"Device '{device_str}' is not valid for inference (CUDA devices are not supported).")
+        return device_info
+
+    def get_training_device_info(self, device_str: str) -> DeviceInfo:
+        """
+        Get DeviceInfo for a given device string, ensuring it's valid for training.
+
+        Args:
+            device_str: Device string in format '<target>[-<index>]'
+                (e.g., 'auto', 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')
+
+        Returns:
+            DeviceInfo: Information about the specified training device
+        """
+        # For training, all devices are currently valid, but we can add custom validation here if needed in the future
+        return self.get_device_info(device_str)
 
     @staticmethod
     def _parse_device(device_str: str) -> tuple[DeviceType, int]:
@@ -145,7 +190,8 @@ class SystemService:
         Parse device string into type and index
 
         Args:
-            device_str: Device string in format '<target>[-<index>]' (e.g., 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')
+            device_str: Device string in format '<target>[-<index>]'
+                (e.g., 'auto', 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')
 
         Returns:
             tuple[str, int]: Device type and index
@@ -159,11 +205,48 @@ class SystemService:
         return DeviceType(device_type.lower()), device_index
 
     @staticmethod
+    def supports_int8(device_info: DeviceInfo) -> bool:
+        """
+        Check if the given device supports INT8 inference using OpenVINO.
+
+        For CPU devices, INT8 is always supported.
+        For GPU devices, the check is done via OpenVINO's OPTIMIZATION_CAPABILITIES property.
+
+        Args:
+            device_info: The device to check.
+
+        Returns:
+            bool: True if the device supports INT8 inference, False otherwise.
+        """
+        if device_info.type == DeviceType.CPU:
+            return True
+        if device_info.type == DeviceType.CUDA:
+            return False
+        try:
+            from model_api.adapters import create_core
+
+            core = create_core()
+            ov_device = device_info.as_openvino
+            capabilities = core.get_property(device_name=ov_device, property="OPTIMIZATION_CAPABILITIES")
+            return "INT8" in capabilities
+        except Exception:
+            logger.exception(
+                "Failed to query INT8 support for device '{}' (OpenVINO device '{}'). Assuming not supported.",
+                device_info,
+                device_info.as_openvino,
+            )
+            return False
+
+    @staticmethod
     def get_camera_devices() -> list[CameraInfo]:
         """
         Get available camera devices.
+        Camera names are formatted as "<camera_name> [<index>]".
 
         Returns:
             list[CameraInfo]: List of available camera devices
         """
-        return [CameraInfo(index=camera.index, name=camera.name) for camera in enumerate_cameras()]
+        if (backend := CV2_BACKENDS.get(platform.system())) is None:
+            raise RuntimeError(f"Unsupported platform: {platform.system()}")
+
+        return [CameraInfo(index=cam.index, name=f"{cam.name} [{cam.index}]") for cam in enumerate_cameras(backend)]

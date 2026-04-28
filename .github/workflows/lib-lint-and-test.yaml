@@ -1,23 +1,21 @@
-name: Geti Tune Library checks
+name: Geti Library checks
 
 on:
-  push:
-    branches:
-      - develop
-      - release/**
-    tags:
-      - "v*"
-  pull_request:
   merge_group:
     branches:
       - develop
       - release/**
-  workflow_dispatch: # run on request (no need for PR)
+  push:
+    tags:
+      - "v*"
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
 
 permissions: {} # No permissions by default
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: lib-lint-and-test-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -26,131 +24,98 @@ jobs:
   # If PR or merge_group -> run only if files in specified paths changed
   check-paths:
     name: Check if workflow should run
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
     outputs:
-      run_workflow: ${{ steps.run_workflow.outputs.run }}
+      run_workflow: ${{ steps.check_paths.outputs.run }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - &checkout
+        name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Get all paths that should trigger the workflow
-        id: changed-files-yaml
-        uses: tj-actions/changed-files@e0021407031f5be11a464abee9a0776171c79891 # v47.0.1
+      - name: Check paths
+        id: check_paths
+        uses: ./.github/actions/check-paths
         with:
           files_yaml: |
             test:
               - library/**
               - .github/**
 
-      - name: Set run flag
-        id: run_workflow
-        run: |
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ steps.changed-files-yaml.outputs.test_any_changed }}" = "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
   code-quality-checks:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
     needs: check-paths
     if: needs.check-paths.outputs.run_workflow == 'true'
     permissions:
       contents: read
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - *checkout
+
+      - name: Install Python, uv and Just
+        uses: ./.github/actions/install-common-deps
         with:
-          persist-credentials: false
+          uv-version-file: library/pyproject.toml # Install the uv version specified in pyproject.toml
+          python-version: "3.11" # Use the lowest supported Python version for linting/type-checking
 
-      - name: Install uv and set the Python version
-        uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
-        with:
-          version: "0.9.7"
-          enable-cache: false
-          python-version: "3.10" # Use the lowest supported Python version for linting/type-checking
-
-      - name: Installing dependencies
+      - name: Prepare venv and install Python dependencies
         working-directory: library
-        run: |
-          uv lock --check
-          uv sync --frozen
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1" # Skip downloading LFS files for deps installed via git
+        run: just venv
 
-      - name: Check formatting with ruff
+      - name: Run linters and type-checkers
         working-directory: library
-        run: |
-          uv run ruff check --output-format=github .
-          uv run ruff format --check .
-
-      # TODO: remove 'continue-on-error' after addressing all mypy issues
-      # https://github.com/open-edge-platform/training_extensions/issues/5006
-      - name: Check source code with mypy
-        continue-on-error: true
-        working-directory: library
-        run: |
-          uv run mypy src/otx
+        run: just lint
 
   unit-tests:
-    runs-on: [self-hosted, linux, x64, dev, dmount]
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
     permissions:
       contents: read
       # The id-token permission is required by Codecov to use OIDC
       id-token: write
     needs:
-      - code-quality-checks
       - check-paths
     if: needs.check-paths.outputs.run_workflow == 'true'
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.11", "3.14"]
     name: unit-tests-with-Python${{ matrix.python-version }}
     steps:
+      # YAML anchors not used cause currently zizmor don't support them in matrix strategies
       - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       # TODO remove after switching to an official Datumaro release with pre-built wheels
       - name: Installing Rust toolchain
-        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
 
-      - name: Install uv and set the Python version
-        uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+      - name: Install Python, uv and Just
+        uses: ./.github/actions/install-common-deps
         with:
-          version: "0.9.7"
-          enable-cache: false
+          uv-version-file: library/pyproject.toml # Install the uv version specified in pyproject.toml
           python-version: ${{ matrix.python-version }}
 
       - name: Installing dependencies
         working-directory: library
-        run: |
-          uv lock --check
-          uv sync --frozen
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1" # Skip downloading LFS files for deps installed via git
+        run: just venv
 
-      - name: Unit testing (excluding models)
+      - name: Unit testing
         working-directory: library
         env:
           OMP_NUM_THREADS: "1"
-        run: uv run pytest tests/unit --ignore=tests/unit/backend/native/models --cov --cov-report=xml --cov-append
-
-      # Unit test models separately using --forked flag so that each is run in a separate process.
-      # Running these models after each other from the same process can cause segfaults
-      - name: Unit testing models
-        working-directory: library
-        env:
-          OMP_NUM_THREADS: "1"
-        run: uv run pytest tests/unit/backend/native/models --cov --cov-report=xml --cov-append --forked
+        run: just test-unit --cov --cov-report=xml --cov-append
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5.5.2
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           directory: library
           flags: coverage_unit-tests_Python-${{ matrix.python-version }}
@@ -161,12 +126,12 @@ jobs:
     permissions:
       contents: read
     needs:
-      - unit-tests
       - check-paths
+    if: needs.check-paths.outputs.run_workflow == 'true'
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.11", "3.14"]
         task:
           - "multi_class_cls"
           - "multi_label_cls"
@@ -177,42 +142,41 @@ jobs:
           - "semantic_segmentation"
     name: integration-tests-${{ matrix.task }}-py${{ matrix.python-version }}
     steps:
+      # YAML anchors aren't used because Zizmor fails here and support for them is best-effort for now
       - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       # TODO remove after switching to an official Datumaro release with pre-built wheels
       - name: Installing Rust toolchain
-        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
         with:
           toolchain: stable
 
-      - name: Install uv and set the Python version
-        uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+      - name: Install Python, uv and Just
+        uses: ./.github/actions/install-common-deps
         with:
-          version: "0.9.7"
-          enable-cache: false
+          uv-version-file: library/pyproject.toml # Install the uv version specified in pyproject.toml
           python-version: ${{ matrix.python-version }}
 
       - name: Installing dependencies
         working-directory: library
-        run: |
-          uv lock --check
-          uv sync --frozen --extra cuda
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1" # Skip downloading LFS files for deps installed via git
+        run: just venv --device cuda
 
       - name: Integration testing
         working-directory: library
         env:
           CUBLAS_WORKSPACE_CONFIG: ":4096:8"
-        run: |
-          uv run --frozen --extra cuda pytest tests/integration \
-            -ra \
-            --showlocals \
-            --csv=${{ matrix.task }}_Python-${{ matrix.python-version }}.csv \
-            --task ${{ matrix.task }} \
-            --open-subprocess \
-            --run-category-only
+        run: just test-integration \
+          -ra \
+          --showlocals \
+          --csv=${{ matrix.task }}_Python-${{ matrix.python-version }}.csv \
+          --task ${{ matrix.task }} \
+          --open-subprocess \
+          --run-category-only
 
   required-check:
     name: Required Check lib-lint-and-test
@@ -221,7 +185,7 @@ jobs:
       - code-quality-checks
       - unit-tests
       - integration-tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
     env:
       CHECKS: ${{ join(needs.*.result, ' ') }}
     if: always() && !cancelled()

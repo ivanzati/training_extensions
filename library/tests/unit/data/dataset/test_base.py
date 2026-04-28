@@ -1,7 +1,7 @@
-# Copyright (C) 2025 Intel Corporation
+# Copyright (C) 2025-2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for base_new OTXDataset."""
+"""Unit tests for base_new VisionDataset."""
 
 from __future__ import annotations
 
@@ -11,9 +11,8 @@ import pytest
 import torch
 from datumaro.experimental import Dataset
 
-from otx.data.dataset.base import OTXDataset, _default_collate_fn
-from otx.data.entity.sample import OTXSample
-from otx.data.entity.torch.torch import OTXDataBatch
+from getitune.data.dataset.base import VisionDataset, _default_collate_fn
+from getitune.data.entity.sample import BaseSample, SampleBatch
 
 
 class TestDefaultCollateFn:
@@ -22,28 +21,26 @@ class TestDefaultCollateFn:
     def test_collate_with_torch_tensors(self):
         """Test collating items with torch tensor images."""
         # Create mock samples with torch tensor images
-        sample1 = Mock(spec=OTXSample)
+        sample1 = Mock(spec=BaseSample)
         sample1.image = torch.randn(3, 224, 224)
         sample1.label = torch.tensor(0)
         sample1.masks = None
         sample1.bboxes = None
         sample1.keypoints = None
-        sample1.polygons = None
         sample1.img_info = None
 
-        sample2 = Mock(spec=OTXSample)
+        sample2 = Mock(spec=BaseSample)
         sample2.image = torch.randn(3, 224, 224)
         sample2.label = torch.tensor(1)
         sample2.masks = None
         sample2.bboxes = None
         sample2.keypoints = None
-        sample2.polygons = None
         sample2.img_info = None
 
         items = [sample1, sample2]
         result = _default_collate_fn(items)
 
-        assert isinstance(result, OTXDataBatch)
+        assert isinstance(result, SampleBatch)
         assert result.batch_size == 2
         assert isinstance(result.images, torch.Tensor)
         assert result.images.shape == (2, 3, 224, 224)
@@ -51,36 +48,111 @@ class TestDefaultCollateFn:
         assert result.labels == [torch.tensor(0), torch.tensor(1)]
 
     def test_collate_with_different_image_shapes(self):
-        """Test collating items with different image shapes."""
-        sample1 = Mock(spec=OTXSample)
+        """Test collating items with different image shapes raises RuntimeError."""
+        sample1 = Mock(spec=BaseSample)
         sample1.image = torch.randn(3, 224, 224)
         sample1.label = None
         sample1.masks = None
         sample1.bboxes = None
         sample1.keypoints = None
-        sample1.polygons = None
         sample1.img_info = None
 
-        sample2 = Mock(spec=OTXSample)
+        sample2 = Mock(spec=BaseSample)
         sample2.image = torch.randn(3, 256, 256)
         sample2.label = None
         sample2.masks = None
         sample2.bboxes = None
         sample2.keypoints = None
-        sample2.polygons = None
         sample2.img_info = None
 
         items = [sample1, sample2]
-        result = _default_collate_fn(items)
+        # torch.stack requires same-size tensors; different shapes mean
+        # the resize/augmentation pipeline is misconfigured.
+        with pytest.raises(RuntimeError, match="stack expects each tensor to be equal size"):
+            _default_collate_fn(items)
 
-        # When shapes are different, should return list instead of stacked tensor
-        assert isinstance(result.images, list)
-        assert len(result.images) == 2
-        assert result.labels is None
+    def test_collate_rejects_unprocessed_16bit_images(self):
+        """Test that int32 tensors (simulating unprocessed 16-bit images) are rejected."""
+        sample = Mock(spec=BaseSample)
+        sample.image = torch.randint(0, 65536, (3, 32, 32), dtype=torch.int32)
+        sample.label = torch.tensor(0)
+        sample.masks = None
+        sample.bboxes = None
+        sample.keypoints = None
+        sample.img_info = None
+
+        with pytest.raises(TypeError, match="high-bit-depth image"):
+            _default_collate_fn([sample])
+
+    def test_collate_rejects_int16_images(self):
+        """Test that int16 tensors (unprocessed signed 16-bit) are rejected."""
+        sample = Mock(spec=BaseSample)
+        sample.image = torch.randint(-1000, 1000, (3, 32, 32), dtype=torch.int16)
+        sample.label = torch.tensor(0)
+        sample.masks = None
+        sample.bboxes = None
+        sample.keypoints = None
+        sample.img_info = None
+
+        with pytest.raises(TypeError, match="high-bit-depth image"):
+            _default_collate_fn([sample])
+
+    def test_collate_casts_uint8_labels_to_long(self):
+        """Test that uint8 labels are cast to long during collation."""
+        sample1 = Mock(spec=BaseSample)
+        sample1.image = torch.randn(3, 224, 224)
+        sample1.label = torch.tensor([0, 1], dtype=torch.uint8)
+        sample1.masks = None
+        sample1.bboxes = None
+        sample1.keypoints = None
+        sample1.img_info = None
+
+        sample2 = Mock(spec=BaseSample)
+        sample2.image = torch.randn(3, 224, 224)
+        sample2.label = torch.tensor([2], dtype=torch.uint8)
+        sample2.masks = None
+        sample2.bboxes = None
+        sample2.keypoints = None
+        sample2.img_info = None
+
+        result = _default_collate_fn([sample1, sample2])
+
+        assert isinstance(result, SampleBatch)
+        assert result.labels is not None
+        for label in result.labels:
+            assert label.dtype == torch.long, f"Expected torch.long but got {label.dtype}"
+        # Verify values are preserved after casting
+        assert torch.equal(result.labels[0], torch.tensor([0, 1], dtype=torch.long))
+        assert torch.equal(result.labels[1], torch.tensor([2], dtype=torch.long))
+
+    def test_collate_casts_empty_uint8_labels_to_long(self):
+        """Test that empty uint8 labels (unannotated images) are cast to long."""
+        sample1 = Mock(spec=BaseSample)
+        sample1.image = torch.randn(3, 64, 64)
+        sample1.label = torch.tensor([1], dtype=torch.uint8)
+        sample1.masks = None
+        sample1.bboxes = None
+        sample1.keypoints = None
+        sample1.img_info = None
+
+        sample2 = Mock(spec=BaseSample)
+        sample2.image = torch.randn(3, 64, 64)
+        sample2.label = torch.zeros(0, dtype=torch.uint8)  # empty label (no annotations)
+        sample2.masks = None
+        sample2.bboxes = None
+        sample2.keypoints = None
+        sample2.img_info = None
+
+        result = _default_collate_fn([sample1, sample2])
+
+        assert result.labels is not None
+        for label in result.labels:
+            assert label.dtype == torch.long
+        assert result.labels[1].shape == (0,)
 
 
-class TestOTXDataset:
-    """Test OTXDataset class."""
+class TestVisionDataset:
+    """Test VisionDataset class."""
 
     def setup_method(self):
         """Set up test fixtures."""
@@ -100,18 +172,17 @@ class TestOTXDataset:
 
     def test_apply_transforms_with_compose(self):
         """Test _apply_transforms with Compose transforms."""
-        from otx.data.transform_libs.torchvision import Compose
+        from torchvision.transforms.v2 import Compose
 
         mock_compose = Mock(spec=Compose)
-        mock_entity = Mock(spec=OTXSample)
+        mock_entity = Mock(spec=BaseSample)
+        mock_entity.image = torch.rand(3, 32, 32, dtype=torch.float32)
         mock_result = Mock()
         mock_compose.return_value = mock_result
 
-        dataset = OTXDataset(
+        dataset = VisionDataset(
             dm_subset=self.mock_dm_subset,
             transforms=mock_compose,
-            data_format="arrow",
-            to_tv_image=True,
         )
 
         result = dataset._apply_transforms(mock_entity)
@@ -122,14 +193,14 @@ class TestOTXDataset:
     def test_apply_transforms_with_callable(self):
         """Test _apply_transforms with callable transform."""
         mock_transform = Mock()
-        mock_entity = Mock(spec=OTXSample)
+        mock_entity = Mock(spec=BaseSample)
+        mock_entity.image = torch.rand(3, 32, 32, dtype=torch.float32)
         mock_result = Mock()
         mock_transform.return_value = mock_result
 
-        dataset = OTXDataset(
+        dataset = VisionDataset(
             dm_subset=self.mock_dm_subset,
             transforms=mock_transform,
-            data_format="arrow",
         )
 
         result = dataset._apply_transforms(mock_entity)
@@ -142,17 +213,17 @@ class TestOTXDataset:
         transform1 = Mock()
         transform2 = Mock()
 
-        mock_entity = Mock(spec=OTXSample)
+        mock_entity = Mock(spec=BaseSample)
+        mock_entity.image = torch.rand(3, 32, 32, dtype=torch.float32)
         intermediate_result = Mock()
         final_result = Mock()
 
         transform1.return_value = intermediate_result
         transform2.return_value = final_result
 
-        dataset = OTXDataset(
+        dataset = VisionDataset(
             dm_subset=self.mock_dm_subset,
             transforms=[transform1, transform2],
-            data_format="arrow",
         )
 
         result = dataset._apply_transforms(mock_entity)
@@ -166,13 +237,13 @@ class TestOTXDataset:
         transform1 = Mock()
         transform2 = Mock()
 
-        mock_entity = Mock(spec=OTXSample)
+        mock_entity = Mock(spec=BaseSample)
+        mock_entity.image = torch.rand(3, 32, 32, dtype=torch.float32)
         transform1.return_value = None  # First transform returns None
 
-        dataset = OTXDataset(
+        dataset = VisionDataset(
             dm_subset=self.mock_dm_subset,
             transforms=[transform1, transform2],
-            data_format="arrow",
         )
 
         result = dataset._apply_transforms(mock_entity)
@@ -183,13 +254,13 @@ class TestOTXDataset:
 
     def test_iterable_transforms_with_non_list(self):
         """Test _iterable_transforms with non-list iterable raises TypeError."""
-        dataset = OTXDataset(
+        dataset = VisionDataset(
             dm_subset=self.mock_dm_subset,
             transforms=self.mock_transforms,
-            data_format="arrow",
         )
 
-        mock_entity = Mock(spec=OTXSample)
+        mock_entity = Mock(spec=BaseSample)
+        mock_entity.image = torch.rand(3, 32, 32, dtype=torch.float32)
         dataset.transforms = "not_a_list"  # String is iterable but not a list
 
         with pytest.raises(TypeError):
@@ -200,12 +271,12 @@ class TestOTXDataset:
         mock_item = Mock()
         self.mock_dm_subset.__getitem__ = Mock(return_value=mock_item)
 
-        mock_transformed_item = Mock(spec=OTXSample)
+        mock_transformed_item = Mock(spec=BaseSample)
+        mock_transformed_item.image = torch.rand(3, 32, 32)
 
-        dataset = OTXDataset(
+        dataset = VisionDataset(
             dm_subset=self.mock_dm_subset,
             transforms=self.mock_transforms,
-            data_format="arrow",
         )
 
         with patch.object(dataset, "_apply_transforms", return_value=mock_transformed_item):
@@ -219,14 +290,13 @@ class TestOTXDataset:
         mock_item = Mock()
         self.mock_dm_subset.__getitem__ = Mock(return_value=mock_item)
 
-        dataset = OTXDataset(
+        dataset = VisionDataset(
             dm_subset=self.mock_dm_subset,
             transforms=self.mock_transforms,
-            data_format="arrow",
             max_refetch=2,
         )
 
-        mock_transformed_item = Mock(spec=OTXSample)
+        mock_transformed_item = Mock(spec=BaseSample)
 
         # First call returns None, second returns valid item
         with patch.object(dataset, "_apply_transforms", side_effect=[None, mock_transformed_item]):
@@ -237,10 +307,10 @@ class TestOTXDataset:
 
     def test_collate_fn_property(self):
         """Test collate_fn property returns _default_collate_fn."""
-        dataset = OTXDataset(
+        dataset = VisionDataset(
             dm_subset=self.mock_dm_subset,
             transforms=self.mock_transforms,
-            data_format="arrow",
         )
 
-        assert dataset.collate_fn == _default_collate_fn
+        collate = dataset.collate_fn
+        assert collate is _default_collate_fn

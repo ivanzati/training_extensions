@@ -1,36 +1,33 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { ActionButton, dimensionValue, Flex, Heading, Item, Menu, MenuTrigger, Text } from '@geti/ui';
-import { MoreMenu, VideoThumb } from '@geti/ui/icons';
+import { dimensionValue, Flex, Heading, Text } from '@geti/ui';
 
-import type { ArchitectureGroup } from '../../types';
+import { type ModelArchitectureWithPerformanceCategory } from '../../../../../constants/shared-types';
+import { PerformanceCategoryBadge } from '../model-row/performance-category-badge.component';
 
 type ArchitectureGroupHeaderProps = {
-    architecture: ArchitectureGroup;
+    architecture: ModelArchitectureWithPerformanceCategory | undefined;
 };
 
 export const ArchitectureGroupHeader = ({ architecture }: ArchitectureGroupHeaderProps) => {
+    // Should never happen, but just in case
+    if (architecture === undefined) {
+        return <Text>Unknown</Text>;
+    }
+
     return (
-        <Flex alignItems={'center'} marginBottom={'size-225'} gap={'size-200'}>
+        <Flex alignItems={'center'} gap={'size-200'} marginBottom={'size-225'}>
             <Heading level={2} UNSAFE_style={{ fontSize: dimensionValue('size-300') }}>
                 {architecture.name}
             </Heading>
 
-            <Flex alignItems={'center'} gap={'size-100'}>
-                <VideoThumb />
-                <Text>{architecture.recommendedFor}</Text>
-            </Flex>
-
-            <MenuTrigger>
-                <ActionButton isQuiet>
-                    <MoreMenu />
-                </ActionButton>
-                <Menu>
-                    <Item key='export'>Export all</Item>
-                    <Item key='delete'>Delete all</Item>
-                </Menu>
-            </MenuTrigger>
+            {architecture.performanceCategory !== undefined && (
+                <PerformanceCategoryBadge
+                    id={'architecture-name'}
+                    performanceCategory={architecture.performanceCategory}
+                />
+            )}
         </Flex>
     );
 };

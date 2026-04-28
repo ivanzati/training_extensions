@@ -1,89 +1,94 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, ButtonGroup, Divider, Flex, Heading, Text, toast } from '@geti/ui';
-import { useQueryClient } from '@tanstack/react-query';
-import { useProjectIdentifier } from 'hooks/use-project-identifier.hook';
+import { Dispatch, SetStateAction, useMemo } from 'react';
 
-import { $api } from '../../../../api/client';
-import { AddMediaButton } from '../../../../components/add-media-button/add-media-button.component';
-import { CheckboxInput } from '../../../../components/checkbox-input/checkbox-input.component';
-import type { DatasetItem } from '../../../../constants/shared-types';
-import { TrainModel } from '../../../models/train-model/train-model';
-import { DeleteMediaItem } from '../../gallery/delete-media-item/delete-media-item.component';
-import { useSelectedData } from '../../selected-data-provider.component';
-import { toggleMultipleSelection, updateSelectedKeysTo } from './util';
+import {
+    Button,
+    ButtonGroup,
+    Checkbox,
+    dimensionValue,
+    Divider,
+    Flex,
+    Heading,
+    MediaViewModes,
+    ViewModes,
+} from '@geti/ui';
+import { isString } from 'lodash-es';
+
+import type { Media } from '../../../../constants/shared-types';
+import { isImage } from '../../../../shared/media-item-utils';
+import { TrainModel } from '../../../models/train-model/train-model.component';
+import { ImportExport } from '../../import-export/import-export.component';
+import { useSelectedData } from '../../providers/selected-data-provider.component';
+import { DeleteMediaItem } from '../delete-media-item/delete-media-item.component';
+import { useSelectDatasetItem } from '../hooks/use-select-dataset-item.hook';
+import { AssignLabel } from './assign-label.component';
+import { DatasetStatistics } from './dataset-statistics/dataset-statistics.component';
+import { FilterByStatus } from './filter-by-status/filter-by-status.component';
+import { MediaFilterLabels } from './media-filter-labels/media-filter-labels.component';
+import { MediaUpload } from './media-upload.component';
+import { TotalItems } from './total-items.component';
+import { toggleMultipleSelection } from './util';
 
 type ToolbarProps = {
-    items: DatasetItem[];
+    items: Media[];
+    viewMode: ViewModes;
+    setViewMode: Dispatch<SetStateAction<ViewModes>>;
 };
 
-export const Toolbar = ({ items }: ToolbarProps) => {
-    const projectId = useProjectIdentifier();
-    const queryClient = useQueryClient();
-    const { selectedKeys, setSelectedKeys, setMediaState, toggleSelectedKeys } = useSelectedData();
+type AnnotateButtonProps = {
+    isDisabled?: boolean;
+    onClick?: () => void;
+};
 
-    const addItemMutation = $api.useMutation('post', '/api/projects/{project_id}/dataset/items');
+const AnnotateButton = ({ isDisabled, onClick }: AnnotateButtonProps) => {
+    return (
+        <Button margin={0} variant={'primary'} onPress={onClick} isDisabled={isDisabled}>
+            Annotate
+        </Button>
+    );
+};
 
-    const totalSelectedElements = selectedKeys instanceof Set ? selectedKeys.size : 0;
+export const Toolbar = ({ items, viewMode, setViewMode }: ToolbarProps) => {
+    const { onSelectedMediaItemChange } = useSelectDatasetItem();
+    const { selectedKeys, setSelectedKeys, toggleSelectedKeys } = useSelectedData();
+
+    const selectedMediaItems = selectedKeys instanceof Set ? selectedKeys : null;
+
+    const totalSelectedElements = selectedMediaItems?.size ?? 0;
     const hasSelectedElements = totalSelectedElements > 0;
-    const message = hasSelectedElements ? `${totalSelectedElements} selected` : `${items.length} images`;
 
     const handleToggleManyItemSelection = () => {
         const images = items.map((item) => String(item.id));
         setSelectedKeys(toggleMultipleSelection(images));
     };
 
-    const handleAccept = () => {
-        setSelectedKeys(new Set());
-        setMediaState(updateSelectedKeysTo(selectedKeys, 'accepted'));
-    };
+    const selectedImagesIds = useMemo(() => {
+        if (selectedMediaItems === null) return [];
 
-    const handleReject = () => {
-        setSelectedKeys(new Set());
-        setMediaState(updateSelectedKeysTo(selectedKeys, 'rejected'));
-    };
-
-    const handleAddMediaItem = async (files: File[]) => {
-        const uploadPromises = files.map((file) => {
-            const formData = new FormData();
-            formData.append('file', file);
-
-            return addItemMutation.mutateAsync({
-                params: { path: { project_id: projectId } },
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                body: formData as any,
-            });
-        });
-
-        const promises = await Promise.allSettled(uploadPromises);
-
-        const succeeded = promises.filter((result) => result.status === 'fulfilled').length;
-        const failed = promises.filter((result) => result.status === 'rejected').length;
-
-        await queryClient.invalidateQueries({
-            queryKey: ['get', '/api/projects/{project_id}/dataset/items'],
-        });
-
-        if (failed === 0) {
-            toast({ type: 'success', message: `Uploaded ${succeeded} item(s)` });
-        } else if (succeeded === 0) {
-            toast({ type: 'error', message: `Failed to upload ${failed} item(s)` });
-        } else {
-            toast({
-                type: 'warning',
-                message: `Uploaded ${succeeded} item(s), ${failed} failed`,
-            });
-        }
-    };
+        return Array.from(selectedMediaItems)
+            .filter((itemId) => items.some((item) => itemId === item.id && isImage(item)))
+            .filter((itemId) => isString(itemId));
+    }, [selectedMediaItems, items]);
 
     return (
         <Flex direction={'column'} gridArea={'toolbar'} gap={'size-200'} marginBottom={'size-200'}>
             <Flex alignItems={'center'} justifyContent={'space-between'}>
-                <Heading level={1}>Data collection</Heading>
-                <ButtonGroup>
-                    <AddMediaButton onFilesSelected={handleAddMediaItem} />
+                <Heading level={1}>Dataset</Heading>
+                <ButtonGroup UNSAFE_style={{ gap: dimensionValue('size-125') }}>
+                    <ImportExport />
+
+                    <MediaUpload />
+
+                    <AssignLabel selectedImagesIds={selectedImagesIds} />
+
                     <TrainModel />
+
+                    <AnnotateButton
+                        isDisabled={items.at(0) === undefined}
+                        onClick={items.at(0) === undefined ? undefined : () => onSelectedMediaItemChange(items[0])}
+                    />
                 </ButtonGroup>
             </Flex>
 
@@ -97,10 +102,10 @@ export const Toolbar = ({ items }: ToolbarProps) => {
                     alignItems={'center'}
                     justifyContent={'space-between'}
                 >
-                    <CheckboxInput
-                        name={'select all'}
+                    <Checkbox
+                        aria-label={'select all'}
                         onChange={handleToggleManyItemSelection}
-                        isChecked={totalSelectedElements === items.length}
+                        isSelected={hasSelectedElements && totalSelectedElements === items.length}
                     />
 
                     <Divider orientation={'vertical'} size={'S'} />
@@ -112,17 +117,35 @@ export const Toolbar = ({ items }: ToolbarProps) => {
                                 onDeleted={toggleSelectedKeys}
                             />
 
-                            <Button variant={'accent'} onPress={handleAccept}>
+                            {/*
+                                TODO: In the future we will have a single endpoint to accept/decline
+                                    multiple media items at once instead of sending multiple requests in a loop.
+                                    Once we have that, we can reenable these buttons.
+                            */}
+                            {/* <Button variant={'accent'} onPress={handleAccept}>
                                 Accept
                             </Button>
                             <Button variant={'secondary'} onPress={handleReject}>
                                 Decline
-                            </Button>
+                            </Button> */}
                         </>
                     )}
                 </Flex>
 
-                <Text>{message}</Text>
+                <Flex gap={'size-200'} alignItems={'center'}>
+                    <TotalItems totalSelectedElements={totalSelectedElements} />
+
+                    <FilterByStatus />
+
+                    <MediaFilterLabels />
+
+                    <DatasetStatistics />
+                    <MediaViewModes
+                        viewMode={viewMode}
+                        setViewMode={setViewMode}
+                        items={[ViewModes.LARGE, ViewModes.MEDIUM, ViewModes.SMALL]}
+                    />
+                </Flex>
             </Flex>
 
             <Divider size='S' />

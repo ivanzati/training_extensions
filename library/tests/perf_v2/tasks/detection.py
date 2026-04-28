@@ -1,7 +1,7 @@
-# Copyright (C) 2025 Intel Corporation
+# Copyright (C) 2025-2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-"""OTX object detection performance benchmark."""
+"""getitune object detection performance benchmark."""
 
 from __future__ import annotations
 
@@ -13,26 +13,21 @@ from tests.perf_v2.utils import (
     ModelInfo,
 )
 
-from otx.types.task import OTXTaskType
+from getitune.types.task import TaskType
 
-TASK_TYPE = OTXTaskType.DETECTION
+TASK_TYPE = TaskType.DETECTION
 
 MODEL_TEST_CASES = [
     ModelInfo(task=TASK_TYPE.value, name="atss_mobilenetv2", category="default"),
     ModelInfo(task=TASK_TYPE.value, name="yolox_s", category="speed"),
     ModelInfo(task=TASK_TYPE.value, name="dfine_x", category="accuracy"),
     ModelInfo(task=TASK_TYPE.value, name="deim_dfine_x", category="other"),
-    ModelInfo(task=TASK_TYPE.value, name="deimv2_x", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="deim_dfine_l", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="deimv2_l", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="deim_dfine_m", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="deimv2_m", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="deimv2_s", category="other"),
-    ModelInfo(task=TASK_TYPE.value, name="atss_resnext101", category="other"),
-    ModelInfo(task=TASK_TYPE.value, name="rtdetr_101", category="other"),
-    ModelInfo(task=TASK_TYPE.value, name="rtdetr_18", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="rtdetr_50", category="other"),
-    ModelInfo(task=TASK_TYPE.value, name="rtmdet_tiny", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="ssd_mobilenetv2", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="yolox_tiny", category="other"),
     ModelInfo(task=TASK_TYPE.value, name="yolox_l", category="other"),

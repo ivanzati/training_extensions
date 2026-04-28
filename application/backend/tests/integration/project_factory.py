@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from app.db.schema import DatasetItemDB, DatasetItemLabelDB, LabelDB, ModelRevisionDB, PipelineDB, ProjectDB
+from app.db.schema import DatasetItemDB, DatasetItemLabelDB, LabelDB, MediaDB, ModelRevisionDB, PipelineDB, ProjectDB
 from app.models import DatasetItemSubset
 
 
@@ -40,7 +40,7 @@ class ProjectTestDataFactory:
         ...     ProjectTestDataFactory(db_session)
         ...     .with_project(ProjectDB(name="Test"))
         ...     .with_label(label)
-        ...     .with_dataset_items({DatasetItemSubset.TRAINING: 10})
+        ...     .with_media_and_dataset_items({DatasetItemSubset.TRAINING: 10})
         ...     .with_item_labels(label)
         ...     .build()
         ... )
@@ -59,6 +59,7 @@ class ProjectTestDataFactory:
         self._pipeline: PipelineDB | None = None
         self._model_revisions: list[ModelRevisionDB] = []
         self._labels: list[LabelDB] = []
+        self._media: list[MediaDB] = []
         self._dataset_items: list[DatasetItemDB] = []
         self._item_labels: list[DatasetItemLabelDB] = []
 
@@ -71,6 +72,7 @@ class ProjectTestDataFactory:
         self,
         is_running: bool = False,
         model_id: str | None = None,
+        model_variant_id: str | None = None,
         source_id: str | None = None,
         sink_id: str | None = None,
         device: str = "cpu",
@@ -83,6 +85,7 @@ class ProjectTestDataFactory:
             project_id=self._project.id,
             is_running=is_running,
             model_revision_id=model_id,
+            model_variant_id=model_variant_id,
             source_id=source_id,
             sink_id=sink_id,
             device=device,
@@ -107,27 +110,34 @@ class ProjectTestDataFactory:
         self._labels.append(label)
         return self
 
-    def with_dataset_items(self, subset_distribution: dict[DatasetItemSubset, int]) -> "ProjectTestDataFactory":
+    def with_media_and_dataset_items(
+        self, subset_distribution: dict[DatasetItemSubset, int]
+    ) -> "ProjectTestDataFactory":
         """Add dataset items with specified subset distribution."""
         if not self._project:
             raise ValueError("Project must be set before adding dataset items")
 
-        items = [
-            DatasetItemDB(
-                id=str(uuid4()),
-                name=f"test_item_{idx}",
-                format="jpg",
-                size=1024,
-                width=1024,
-                height=768,
-                subset=str(subset),
-                project_id=self._project.id,
-                created_at=datetime.fromisoformat("2025-02-01T00:00:00Z"),
-            )
-            for subset, count in subset_distribution.items()
-            for idx in range(count)
-        ]
-        self._dataset_items.extend(items)
+        for subset, count in subset_distribution.items():
+            for idx in range(count):
+                media = MediaDB(
+                    id=str(uuid4()),
+                    type="image",
+                    name=f"test_item_{idx + 1}",
+                    format="jpg",
+                    size=1024,
+                    width=1024,
+                    height=768,
+                    project_id=self._project.id,
+                    created_at=datetime.fromisoformat("2025-02-01T00:00:00Z"),
+                )
+                self._media.append(media)
+                dataset_item = DatasetItemDB(
+                    id=media.id,
+                    subset=str(subset),
+                    project_id=self._project.id,
+                    created_at=datetime.fromisoformat("2025-02-01T00:00:00Z"),
+                )
+                self._dataset_items.append(dataset_item)
         return self
 
     def with_item_labels(self, label: LabelDB) -> "ProjectTestDataFactory":
@@ -164,6 +174,10 @@ class ProjectTestDataFactory:
 
         if self._labels:
             self.db_session.add_all(self._labels)
+            self.db_session.flush()
+
+        if self._media:
+            self.db_session.add_all(self._media)
             self.db_session.flush()
 
         if self._dataset_items:

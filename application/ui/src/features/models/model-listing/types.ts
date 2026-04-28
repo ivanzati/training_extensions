@@ -1,11 +1,11 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SchemaModelView } from '../../../api/openapi-spec';
+import type { Model } from '../../../constants/shared-types';
 
 export type GroupByMode = 'dataset' | 'architecture';
 
-export type SortBy = 'name' | 'trained' | 'architecture' | 'size' | 'score';
+export type SortBy = 'name' | 'trained' | 'architecture' | 'dataset' | 'size' | 'score';
 
 export type DatasetGroup = {
     id: string;
@@ -18,14 +18,14 @@ export type DatasetGroup = {
         validation: number;
         testing: number;
     };
+    filesDeleted: boolean;
 };
 
 export type ArchitectureGroup = {
-    name: string;
-    recommendedFor: string;
+    id: string;
 };
 
 export type GroupedModels = {
     group: DatasetGroup | ArchitectureGroup;
-    models: SchemaModelView[];
+    models: Model[];
 };

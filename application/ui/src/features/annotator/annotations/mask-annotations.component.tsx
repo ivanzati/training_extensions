@@ -3,8 +3,8 @@
 
 import { ReactNode, useId } from 'react';
 
-import type { Annotation } from '../types';
-import { AnnotationShapeWithLabels } from './annotation-shape-with-labels.component';
+import type { Annotation } from '../../../shared/types';
+import { AnnotationShapeWithoutLabels } from './annotation-shape-without-labels.component';
 
 type MaskAnnotationsProps = {
     annotations: Annotation[];
@@ -16,7 +16,7 @@ type MaskAnnotationsProps = {
 
 export const MaskAnnotations = ({ annotations, children, width, height, isEnabled }: MaskAnnotationsProps) => {
     const id = useId();
-    const maskOpacity = isEnabled ? 0.8 : 0.0;
+    const maskOpacity = isEnabled ? 0.3 : 0.0;
 
     return (
         <>
@@ -34,7 +34,7 @@ export const MaskAnnotations = ({ annotations, children, width, height, isEnable
                             transitionDelay: isEnabled ? '0s' : '.25s',
                         }}
                     >
-                        <AnnotationShapeWithLabels annotation={annotation} />
+                        <AnnotationShapeWithoutLabels annotation={annotation} />
                     </g>
                 ))}
             </mask>

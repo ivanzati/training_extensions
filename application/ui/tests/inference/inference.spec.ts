@@ -13,7 +13,7 @@ test.beforeEach(({ network }) => {
             return HttpResponse.json(getMockedProject({ id: 'id-1' }));
         }),
         http.get('/api/projects/{project_id}/pipeline', ({ response }) => {
-            return response(200).json(getMockedPipeline({ status: 'running' }));
+            return response(200).json(getMockedPipeline({ status: 'idle' }));
         }),
         http.get('/api/sources', () => {
             return HttpResponse.json([]);
@@ -52,9 +52,6 @@ test.beforeEach(({ network }) => {
                 },
                 { status: 201 }
             );
-        }),
-        http.patch('/api/projects/{project_id}/pipeline', () => {
-            return HttpResponse.json({});
         })
     );
 });
@@ -68,20 +65,35 @@ test('Inference', async ({ streamPage, page, network }) => {
         expect(streamPage.isConnected()).toBeTruthy();
     });
 
-    await test.step('updates pipeline status', async () => {
+    await test.step('toggles pipeline', async () => {
         await page.goto('/projects/id-1/inference');
 
-        await page.getByRole('switch', { name: 'Disable pipeline' }).click();
+        await expect(page.getByRole('switch', { name: /Enable pipeline/i })).toBeEnabled();
 
         network.use(
+            http.post('/api/projects/{project_id}/pipeline:enable', () => {
+                return HttpResponse.json(null, { status: 204 });
+            }),
+            http.get('/api/projects/{project_id}/pipeline', ({ response }) => {
+                return response(200).json(getMockedPipeline({ status: 'running' }));
+            })
+        );
+
+        await page.getByRole('switch', { name: /Enable pipeline/i }).click();
+
+        await expect(page.getByRole('switch', { name: 'Disable Pipeline' })).toBeEnabled();
+        network.use(
+            http.post('/api/projects/{project_id}/pipeline:disable', () => {
+                return HttpResponse.json(null, { status: 204 });
+            }),
             http.get('/api/projects/{project_id}/pipeline', ({ response }) => {
                 return response(200).json(getMockedPipeline({ status: 'idle' }));
             })
         );
 
-        await page.reload();
+        await page.getByRole('switch', { name: 'Disable Pipeline' }).click();
 
-        await expect(page.getByText('Enable pipeline')).toBeVisible();
+        await expect(page.getByRole('switch', { name: /Enable pipeline/i })).toBeEnabled();
     });
 
     await test.step('updates data collection policy', async () => {
@@ -98,7 +110,11 @@ test('Inference', async ({ streamPage, page, network }) => {
 
         network.use(
             http.patch('/api/projects/{project_id}/pipeline', () => {
-                return HttpResponse.json({});
+                return HttpResponse.json({
+                    project_id: '',
+                    status: 'idle',
+                    device: 'images_folder',
+                });
             }),
             http.get('/api/projects/{project_id}/pipeline', ({ response }) => {
                 return response(200).json(
@@ -123,6 +139,36 @@ test('Inference', async ({ streamPage, page, network }) => {
                 );
             })
         );
+
+        network.use(
+            http.get('/api/projects/{project_id}/pipeline', ({ response }) => {
+                return response(200).json(
+                    getMockedPipeline({
+                        data_collection: {
+                            max_dataset_size: 700,
+                            policies: [
+                                {
+                                    type: 'fixed_rate',
+                                    enabled: true,
+                                    rate: 12,
+                                },
+                                {
+                                    type: 'confidence_threshold',
+                                    enabled: false,
+                                    confidence_threshold: 0.5,
+                                    min_sampling_interval: 2.5,
+                                },
+                            ],
+                        },
+                    })
+                );
+            })
+        );
+
+        const maxDatasetSizeField = page.getByRole('textbox', { name: 'Size' });
+
+        await maxDatasetSizeField.fill('700');
+        await expect(maxDatasetSizeField).toHaveValue('700');
 
         await page.getByRole('switch', { name: 'Toggle auto capturing' }).click();
         await expect(page.getByRole('switch', { name: 'Toggle auto capturing' })).toBeChecked();
@@ -152,11 +198,14 @@ test('Inference', async ({ streamPage, page, network }) => {
             })
         );
 
-        const rateSlider = page.getByRole('slider', { name: 'Rate' });
-        await expect(rateSlider).toBeVisible();
-        await expect(rateSlider).toBeEnabled();
-        await rateSlider.fill('20');
-        await expect(rateSlider).toHaveValue('20');
+        const framesField = page.getByRole('textbox', { name: 'Frames' });
+        const secondsField = page.getByRole('textbox', { name: 'Seconds' });
+
+        await expect(framesField).toBeEnabled();
+        await expect(secondsField).toBeEnabled();
+
+        await framesField.fill('20');
+        await expect(framesField).toHaveValue('20');
 
         await expect(page.getByRole('switch', { name: 'Confidence threshold' })).not.toBeChecked();
 
@@ -234,11 +283,11 @@ test('Inference', async ({ streamPage, page, network }) => {
         );
         await page.goto('/projects/id-1/inference');
 
-        await page.getByRole('button', { name: 'Pipeline configuration' }).click();
         await page.getByRole('button', { name: 'Add new source' }).click();
-        await page.getByRole('button', { name: 'Webcam' }).click();
+        await page.getByRole('button', { name: 'USB Camera' }).click();
 
-        await page.getByRole('textbox', { name: 'Name' }).fill('New Webcam');
+        const usbCamera = 'new camera';
+        await page.getByRole('textbox', { name: 'Name' }).fill(usbCamera);
         await page.getByRole('button', { name: 'Camera list' }).click();
         await page.getByLabel('FaceTime HD Camera', { exact: true }).click();
 
@@ -247,7 +296,7 @@ test('Inference', async ({ streamPage, page, network }) => {
                 return HttpResponse.json([
                     {
                         id: '1',
-                        name: 'New Webcam',
+                        name: usbCamera,
                         source_type: 'usb_camera',
                         device_id: 1,
                     },
@@ -255,22 +304,19 @@ test('Inference', async ({ streamPage, page, network }) => {
             })
         );
 
-        await page.getByRole('button', { name: 'Apply' }).click();
+        await page.getByRole('button', { name: 'Add & Connect' }).click();
 
-        // Click outside the dialog to close it
-        await page.click('body', { position: { x: 10, y: 10 } });
-
-        await page.getByRole('button', { name: 'Pipeline configuration' }).click();
-
-        await expect(page.getByText('New Webcam')).toBeVisible();
+        await expect(page.getByText(usbCamera)).toBeVisible();
         await expect(page.getByText('Device: FaceTime HD Camera')).toBeVisible();
 
         // Go to output tab
-        await page.getByLabel('Dataset import tabs').getByText('Output').click();
+        await page.getByLabel('Pipeline configuration tabs').getByText('Output').click();
 
+        await page.getByRole('button', { name: 'Add new sink' }).click();
         await page.getByRole('button', { name: 'Folder' }).click();
         await page.locator('input[name="name"]').fill('New Folder');
-        await page.locator('input[aria-roledescription="Number field"]').fill('5');
+        await page.locator('input[aria-roledescription="Number field"]').first().fill('5');
+        await page.locator('input[aria-roledescription="Number field"]').nth(1).fill('5');
 
         await page.locator('input[name="folder_path"]').fill('some/path');
         await page.locator('input[name="output_formats"][value="predictions"]').click();
@@ -290,18 +336,11 @@ test('Inference', async ({ streamPage, page, network }) => {
             })
         );
 
-        await page.getByRole('button', { name: 'Apply' }).click();
+        await page.getByRole('button', { name: 'Add & Connect' }).click();
 
-        // Click outside the dialog to close it
-        await page.click('body', { position: { x: 10, y: 10 } });
-
-        await page.getByRole('button', { name: 'Pipeline configuration' }).click();
-        await page.getByLabel('Dataset import tabs').getByText('Output').click();
-
-        await expect(page.locator('input[name="name"]')).toHaveValue('New Folder');
-
-        await expect(page.locator('input[aria-roledescription="Number field"]')).toHaveValue('5');
-        await expect(page.locator('input[name="folder_path"]')).toHaveValue('some/path');
-        await expect(page.locator('input[name="output_formats"][value="predictions"]')).toBeChecked();
+        await expect(page.getByText('New Folder')).toBeVisible();
+        await expect(page.getByText('Folder path: some/path')).toBeVisible();
+        await expect(page.getByText('Rate limit: 5 samples every 1 second')).toBeVisible();
+        await expect(page.getByText('Output formats: predictions')).toBeVisible();
     });
 });

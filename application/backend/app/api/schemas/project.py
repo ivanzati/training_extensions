@@ -1,9 +1,10 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+from datetime import datetime
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.models import HasID, RequiresID
 from app.models import TaskType
@@ -12,9 +13,10 @@ from .label import LabelCreate, LabelView
 
 
 class TaskBase(BaseModel):
-    task_type: TaskType = Field(description="Task type (classification, detection or segmentation).")
+    task_type: TaskType = Field(description="Task type (classification, detection or instance_segmentation).")
     exclusive_labels: bool = Field(
-        default=False, description="Whether labels are exclusive (e.g. classification) or not (e.g. detection)."
+        default=False,
+        description="Whether labels are exclusive (multi class classification) or not (multi label classification).",
     )
 
 
@@ -24,6 +26,14 @@ class TaskView(TaskBase):
 
 class TaskCreate(TaskBase):
     labels: list[LabelCreate] = Field(default_factory=list, description="List of task labels to create.")
+
+    @model_validator(mode="after")
+    def validate_labels(self) -> "TaskCreate":
+        if self.task_type is TaskType.CLASSIFICATION and self.exclusive_labels and len(self.labels) < 2:
+            raise ValueError("Multi-class classification requires at least two labels.")
+        if len(self.labels) == 0:
+            raise ValueError("A project requires at least one label.")
+        return self
 
 
 class ProjectUpdateName(BaseModel):
@@ -59,6 +69,7 @@ class ProjectBase(BaseModel, Generic[T]):
             **({"id": "7b073838-99d3-42ff-9018-4e901eb047fc"} if view else {}),
             "name": "animals",
             "active_pipeline": False if view else None,
+            **({"created_at": "2025-01-01T00:00:00Z"} if view else {}),
             "task": {
                 "task_type": "classification",
                 "exclusive_labels": True,
@@ -77,6 +88,7 @@ class ProjectCreate(HasID, ProjectBase[TaskCreate]):
 
 class ProjectView(RequiresID, ProjectBase[TaskView]):
     active_pipeline: bool = Field(..., description="Whether the project has an active pipeline.")
+    created_at: datetime = Field(..., description="Timestamp when the project was created.")
 
     model_config = {
         "json_schema_extra": {

@@ -13,14 +13,9 @@ from starlette.responses import FileResponse
 from app.api.dependencies import get_data_collector, get_label_service, get_project, get_project_service
 from app.api.schemas import LabelView, PatchLabels, ProjectCreate, ProjectUpdateName, ProjectView
 from app.api.validators import ProjectID
-from app.models import Label, Task
-from app.services import (
-    LabelService,
-    ProjectService,
-    ResourceInUseError,
-    ResourceNotFoundError,
-    ResourceWithIdAlreadyExistsError,
-)
+from app.models import Label, LabelReference, LabelUpdateInfo, Task
+from app.models.project import Project
+from app.services import LabelService, ProjectService, ResourceInUseError, ResourceWithIdAlreadyExistsError
 from app.services.data_collect import DataCollector
 from app.services.label_service import DuplicateLabelsError
 
@@ -126,11 +121,8 @@ def get_project_by_id(
     project_service: Annotated[ProjectService, Depends(get_project_service)],
 ) -> ProjectView:
     """Get info about a given project"""
-    try:
-        project = project_service.get_project_by_id(project_id)
-        return ProjectView.model_validate(project, from_attributes=True)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    project = project_service.get_project_by_id(project_id)
+    return ProjectView.model_validate(project, from_attributes=True)
 
 
 @router.patch(
@@ -148,11 +140,8 @@ def rename_project(
     project_service: Annotated[ProjectService, Depends(get_project_service)],
 ) -> ProjectView:
     """Rename a project"""
-    try:
-        updated = project_service.update_project_name(project_id, project_update_name.name)
-        return ProjectView.model_validate(updated, from_attributes=True)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    updated = project_service.update_project_name(project_id, project_update_name.name)
+    return ProjectView.model_validate(updated, from_attributes=True)
 
 
 @router.delete(
@@ -174,8 +163,6 @@ def delete_project(
     """Delete a project. Project with a running pipeline cannot be deleted."""
     try:
         project_service.delete_project_by_id(project_id)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except ResourceInUseError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
@@ -187,11 +174,14 @@ def delete_project(
         status.HTTP_200_OK: {"description": "Labels updated successfully"},
         status.HTTP_400_BAD_REQUEST: {"description": "Invalid project ID or request body"},
         status.HTTP_404_NOT_FOUND: {"description": "Project or label not found"},
-        status.HTTP_409_CONFLICT: {"description": "Label(s) already exists or have duplicated names or hotkeys"},
+        status.HTTP_409_CONFLICT: {
+            "description": "Label(s) already exists or have duplicated names or hotkeys, "
+            "or minimum number of labels for project will be violated after update."
+        },
     },
 )
 def update_labels(
-    project: Annotated[ProjectView, Depends(get_project)],
+    project: Annotated[Project, Depends(get_project)],
     labels: Annotated[
         PatchLabels,
         Body(
@@ -202,45 +192,18 @@ def update_labels(
 ) -> list[LabelView]:
     """Update labels for a given project"""
     try:
-        existing_ids = label_service.list_ids(project_id=project.id)
-        if labels.labels_to_remove:
-            ids_to_remove = [label.id for label in labels.labels_to_remove]
-            if not all(label_id in existing_ids for label_id in ids_to_remove):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="One or more labels to remove do not exist in the project",
-                )
-        if labels.labels_to_edit:
-            ids_to_edit = [label.id for label in labels.labels_to_edit]
-            if not all(label_id in existing_ids for label_id in ids_to_edit):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="One or more labels to edit do not exist in the project",
-                )
-        for label_to_edit in labels.labels_to_edit:
-            label_service.update_label(
-                project_id=project.id,
-                label_id=label_to_edit.id,
-                new_name=label_to_edit.new_name,
-                new_color=label_to_edit.new_color,
-                new_hotkey=label_to_edit.new_hotkey,
-            )
-        for label_to_remove in labels.labels_to_remove:
-            label_service.delete_label(project_id=project.id, label_id=label_to_remove.id)
-        for label_to_add in labels.labels_to_add:
-            label_service.create_label(
-                project_id=project.id,
-                label_id=label_to_add.id,
-                name=label_to_add.name,
-                color=label_to_add.color,
-                hotkey=label_to_add.hotkey,
-            )
-        updated_labels = label_service.list_all(project_id=project.id)
-        return [LabelView.model_validate(label, from_attributes=True) for label in updated_labels]
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except (ResourceWithIdAlreadyExistsError, DuplicateLabelsError) as e:
+        updated_labels = label_service.update_labels(
+            project=project,
+            labels_to_add=[Label.model_validate(lbl, from_attributes=True) for lbl in labels.labels_to_add],
+            labels_to_edit=[LabelUpdateInfo.model_validate(lbl, from_attributes=True) for lbl in labels.labels_to_edit],
+            labels_to_remove=[
+                LabelReference.model_validate(lbl, from_attributes=True) for lbl in labels.labels_to_remove
+            ],
+        )
+    except (ResourceWithIdAlreadyExistsError, DuplicateLabelsError, ValueError) as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+    return [LabelView.model_validate(label, from_attributes=True) for label in updated_labels]
 
 
 @router.get(
@@ -256,13 +219,10 @@ def get_project_thumbnail(
     project_id: ProjectID, project_service: Annotated[ProjectService, Depends(get_project_service)]
 ) -> FileResponse:
     """Get the project's thumbnail image"""
-    try:
-        thumbnail_path = project_service.get_project_thumbnail_path(project_id)
-        if thumbnail_path:
-            return FileResponse(path=thumbnail_path)
-        raise HTTPException(status_code=status.HTTP_204_NO_CONTENT)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    thumbnail_path = project_service.get_project_thumbnail_path(project_id)
+    if thumbnail_path:
+        return FileResponse(path=thumbnail_path)
+    raise HTTPException(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -279,8 +239,5 @@ def capture_next_pipeline_frame(
     data_collector: Annotated[DataCollector, Depends(get_data_collector)],
 ) -> None:
     """Marks next pipeline frame to be collected"""
-    try:
-        project_service.get_project_by_id(project_id)
-        data_collector.collect_next_frame()
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    project_service.get_project_by_id(project_id)
+    data_collector.collect_next_frame()

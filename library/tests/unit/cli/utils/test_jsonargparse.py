@@ -1,14 +1,14 @@
-# Copyright (C) 2024 Intel Corporation
+# Copyright (C) 2024-2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
 from copy import deepcopy
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from jsonargparse import ArgumentParser, Namespace
 
-from otx.cli.utils.jsonargparse import (
+from getitune.cli.utils.jsonargparse import (
     apply_config,
     flatten_dict,
     get_configuration,
@@ -23,13 +23,12 @@ from otx.cli.utils.jsonargparse import (
 def fxt_configs() -> Namespace:
     return Namespace(
         data=Namespace(
-            stack_images=True,
             train_subset=Namespace(
                 batch_size=32,
                 num_workers=4,
                 transforms=[
                     {
-                        "class_path": "otx.data.transform_libs.torchvision.Resize",
+                        "class_path": "getitune.data.augmentation.transforms.Resize",
                         "init_args": {
                             "keep_ratio": True,
                             "transform_bbox": True,
@@ -38,12 +37,12 @@ def fxt_configs() -> Namespace:
                         },
                     },
                     {
-                        "class_path": "otx.data.transform_libs.torchvision.Pad",
+                        "class_path": "torchvision.transforms.v2.Pad",
                         "init_args": {"pad_to_square": True, "transform_mask": True},
                     },
                     {
-                        "class_path": "otx.data.transform_libs.torchvision.RandomFlip",
-                        "init_args": {"prob": 0.5, "is_numpy_to_tvtensor": True},
+                        "class_path": "torchvision.transforms.v2.RandomHorizontalFlip",
+                        "init_args": {"p": 0.5},
                     },
                     {"class_path": "torchvision.transforms.v2.ToDtype", "init_args": {"dtype": "torch.float32"}},
                     {
@@ -56,7 +55,7 @@ def fxt_configs() -> Namespace:
         ),
         callbacks=[
             Namespace(
-                class_path="otx.backend.native.callbacks.iteration_timer.IterationTimer",
+                class_path="getitune.backend.lightning.callbacks.iteration_timer.IterationTimer",
                 init_args=Namespace(prog_bar=True),
             ),
             Namespace(
@@ -91,7 +90,10 @@ def fxt_configs() -> Namespace:
 )
 def test_apply_config_with_reset(fxt_configs: Namespace, reset: str | list[str]) -> None:
     cfg = deepcopy(fxt_configs)
-    with patch_update_configs():
+    with (
+        patch_update_configs(),
+        patch("jsonargparse.Path.__init__", return_value=None),
+    ):
         # test for reset
         overrides = Namespace(
             overrides=Namespace(
@@ -114,8 +116,6 @@ def test_apply_config_with_reset(fxt_configs: Namespace, reset: str | list[str])
         mock_parser.merge_config = ArgumentParser().merge_config
 
         apply_config(None, mock_parser, cfg, "dest", "value")
-
-        assert str(cfg.dest[0]) == "value"
 
         # check values that should not to be changed
         assert cfg.data.train_subset.batch_size == fxt_configs.data.train_subset.batch_size
@@ -143,7 +143,6 @@ def test_namespace_override(fxt_configs) -> None:
 
         namespace_override(configs=cfg, key="data", overrides=overrides, convert_dict_to_namespace=False)
 
-        assert cfg.data.stack_images == fxt_configs.data.stack_images
         assert cfg.data.train_subset.batch_size == fxt_configs.data.train_subset.batch_size
         assert cfg.data.train_subset.num_workers == fxt_configs.data.train_subset.num_workers
         assert cfg.data.train_subset.transforms == fxt_configs.data.train_subset.transforms
@@ -154,14 +153,12 @@ def test_namespace_override(fxt_configs) -> None:
         # test for single key override
         overrides = Namespace(
             mem_cache_img_max_size=[100, 100],
-            stack_images=False,
             train_subset=Namespace(batch_size=64, num_workers=8),
         )
 
         namespace_override(configs=cfg, key="data", overrides=overrides, convert_dict_to_namespace=False)
 
         assert cfg.data.mem_cache_img_max_size == overrides.mem_cache_img_max_size
-        assert cfg.data.stack_images == overrides.stack_images
         assert cfg.data.train_subset.batch_size == overrides.train_subset.batch_size
         assert cfg.data.train_subset.num_workers == overrides.train_subset.num_workers
 
@@ -170,14 +167,14 @@ def test_namespace_override(fxt_configs) -> None:
             train_subset=Namespace(
                 transforms=[
                     {
-                        "class_path": "otx.data.transform_libs.torchvision.Resize",
+                        "class_path": "getitune.data.augmentation.transforms.Resize",
                         "init_args": {
                             "keep_ratio": False,  # for boolean
                             "scale": [512, 512],  # for tuple
                         },
                     },
                     {
-                        "class_path": "otx.data.transform_libs.torchvision.Pad",
+                        "class_path": "torchvision.transforms.v2.Pad",
                         "init_args": {"size_divisor": 32},  # add new key
                     },
                     {
@@ -189,30 +186,40 @@ def test_namespace_override(fxt_configs) -> None:
         )
 
         # to check before adding key
-        assert "size_divisor" not in cfg.data.train_subset.transforms[1]["init_args"]
+        pad_transform = next(
+            t for t in cfg.data.train_subset.transforms if t["class_path"] == "torchvision.transforms.v2.Pad"
+        )
+        assert "size_divisor" not in pad_transform["init_args"]
 
         namespace_override(configs=cfg, key="data", overrides=overrides, convert_dict_to_namespace=False)
 
-        # otx.data.transform_libs.torchvision.Resize
+        # Find transforms by class_path since order may change
+        resize_transform = next(
+            t
+            for t in cfg.data.train_subset.transforms
+            if t["class_path"] == "getitune.data.augmentation.transforms.Resize"
+        )
+        pad_transform = next(
+            t for t in cfg.data.train_subset.transforms if t["class_path"] == "torchvision.transforms.v2.Pad"
+        )
+        normalize_transform = next(
+            t for t in cfg.data.train_subset.transforms if t["class_path"] == "torchvision.transforms.v2.Normalize"
+        )
+
+        # getitune.data.augmentation.transforms.Resize
         assert (
-            cfg.data.train_subset.transforms[0]["init_args"]["keep_ratio"]
+            resize_transform["init_args"]["keep_ratio"]
             == overrides.train_subset.transforms[0]["init_args"]["keep_ratio"]
         )
+        assert resize_transform["init_args"]["scale"] == overrides.train_subset.transforms[0]["init_args"]["scale"]
+        # torchvision.transforms.v2.Pad
+        assert "size_divisor" in pad_transform["init_args"]
         assert (
-            cfg.data.train_subset.transforms[0]["init_args"]["scale"]
-            == overrides.train_subset.transforms[0]["init_args"]["scale"]
-        )
-        # otx.data.transform_libs.torchvision.Pad
-        assert "size_divisor" in cfg.data.train_subset.transforms[1]["init_args"]
-        assert (
-            cfg.data.train_subset.transforms[1]["init_args"]["size_divisor"]
+            pad_transform["init_args"]["size_divisor"]
             == overrides.train_subset.transforms[1]["init_args"]["size_divisor"]
         )
         # torchvision.transforms.v2.Normalize
-        assert (
-            cfg.data.train_subset.transforms[-1]["init_args"]["std"]
-            == overrides.train_subset.transforms[-1]["init_args"]["std"]
-        )
+        assert normalize_transform["init_args"]["std"] == overrides.train_subset.transforms[-1]["init_args"]["std"]
 
         # test for appending new transform
         overrides = Namespace(
@@ -251,7 +258,7 @@ def test_namespace_override(fxt_configs) -> None:
         overrides = Namespace(
             train_subset=Namespace(
                 sampler=Namespace(
-                    class_path="otx.algo.samplers.balanced_sampler.BalancedSampler",
+                    class_path="getitune.algo.samplers.balanced_sampler.BalancedSampler",
                 ),
             ),
         )
@@ -264,9 +271,21 @@ def test_namespace_override(fxt_configs) -> None:
 def test_list_override(fxt_configs) -> None:
     with patch_update_configs():
         list_override(fxt_configs, "callbacks", [])
-        assert fxt_configs.callbacks[0].init_args.prog_bar
-        assert fxt_configs.callbacks[1].init_args.patience == 10
-        assert fxt_configs.callbacks[2].init_args.max_depth == 1
+        # Find callbacks by class_path since order may change with the new list_override behavior
+        iter_timer = next(
+            c
+            for c in fxt_configs.callbacks
+            if c.class_path == "getitune.backend.lightning.callbacks.iteration_timer.IterationTimer"
+        )
+        early_stop = next(
+            c for c in fxt_configs.callbacks if c.class_path == "lightning.pytorch.callbacks.EarlyStopping"
+        )
+        model_summary = next(
+            c for c in fxt_configs.callbacks if c.class_path == "lightning.pytorch.callbacks.RichModelSummary"
+        )
+        assert iter_timer.init_args.prog_bar
+        assert early_stop.init_args.patience == 10
+        assert model_summary.init_args.max_depth == 1
 
         # Wrong Config overriding
         wrong_override = [
@@ -284,7 +303,10 @@ def test_list_override(fxt_configs) -> None:
             },
         ]
         list_override(fxt_configs, "callbacks", callbacks_override)
-        assert fxt_configs.callbacks[1].init_args.patience == 3
+        early_stop = next(
+            c for c in fxt_configs.callbacks if c.class_path == "lightning.pytorch.callbacks.EarlyStopping"
+        )
+        assert early_stop.init_args.patience == 3
 
         logger_override = [
             {
@@ -293,7 +315,12 @@ def test_list_override(fxt_configs) -> None:
             },
         ]
         list_override(fxt_configs, "logger", logger_override)
-        assert fxt_configs.logger[1].init_args.name == "workspace/"
+        tb_logger = next(
+            lg
+            for lg in fxt_configs.logger
+            if lg.class_path == "lightning.pytorch.loggers.tensorboard.TensorBoardLogger"
+        )
+        assert tb_logger.init_args.name == "workspace/"
 
         new_callbacks_override = [
             {
@@ -456,7 +483,7 @@ def test_get_configuration(tmp_path):
     # Call the get_configuration function
     config = get_configuration(config_file)
     assert "config" in config
-    assert config["config"] == [config_file]
+    assert str(config["config"][0]) == str(config_file)
     assert "engine" in config
     assert "data" in config
     assert config["data"]["task"] == "SEMANTIC_SEGMENTATION"

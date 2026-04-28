@@ -1,19 +1,26 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ArchitectureGroup, DatasetGroup, GroupByMode } from '../../types';
+import { ModelArchitectureWithPerformanceCategory } from '../../../../../constants/shared-types';
+import { useModelListing } from '../../provider/model-listing-provider';
+import type { ArchitectureGroup, DatasetGroup } from '../../types';
 import { ArchitectureGroupHeader } from './architecture-group-header.component';
 import { DatasetGroupHeader } from './dataset-group-header.component';
 
 type GroupHeaderProps = {
-    groupBy: GroupByMode;
     data: DatasetGroup | ArchitectureGroup;
+    modelArchitectures: ModelArchitectureWithPerformanceCategory[];
 };
 
-export const GroupHeader = ({ groupBy, data }: GroupHeaderProps) => {
+export const GroupHeader = ({ data, modelArchitectures }: GroupHeaderProps) => {
+    const { groupBy } = useModelListing();
+
     if (groupBy === 'dataset') {
         return <DatasetGroupHeader dataset={data as DatasetGroup} />;
     }
 
-    return <ArchitectureGroupHeader architecture={data as ArchitectureGroup} />;
+    const architecture = data as ArchitectureGroup;
+    const modelArchitecture = modelArchitectures.find(({ id }) => id === architecture.id);
+
+    return <ArchitectureGroupHeader architecture={modelArchitecture} />;
 };

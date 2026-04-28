@@ -1,54 +1,84 @@
-// Copyright (C) 2025 Intel Corporation
+// Copyright (C) 2025-2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { Button, ButtonGroup, dimensionValue, Flex, Grid } from '@geti/ui';
-import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { ActionButton, Button, ButtonGroup, Divider, Flex, Icon, Text } from '@geti/ui';
+import { CloseSemiBold } from '@geti/ui/icons';
+import { useProject } from 'hooks/api/project.hook';
 import { isEmpty } from 'lodash-es';
 
-import type { DatasetItem } from '../../../../constants/shared-types';
+import type { DatasetSubset, Media } from '../../../../constants/shared-types';
 import { useAnnotationActions } from '../../../../shared/annotator/annotation-actions-provider.component';
-import { useAnnotator } from '../../../../shared/annotator/annotator-provider.component';
+import type { AnnotatorMode } from '../../../../shared/annotator/annotator-mode';
+import { isVideoFrame } from '../../../../shared/media-item-utils';
+import { Labels } from '../../../annotator/labels/labels.component';
+import { useVideoPlayerContext } from '../../../annotator/video-player/video-player-provider.component';
+import { isClassificationTask, isMultiLabelClassificationTask } from '../../../project/task-type-guards';
 import { DeleteMediaItem } from '../../gallery/delete-media-item/delete-media-item.component';
-import { LabelPicker } from './label-picker.component';
-import { useSecondaryToolbarState } from './use-secondary-toolbar-state.hook';
+import { Toolbar } from '../toolbar-container/toolbar-container.component';
+import { AnnotatorModes } from './annotator-modes/annotator-modes-toggle.component';
+import { PredictionModelSelector } from './annotator-modes/prediction-model-selector.component';
+import { PredictionButtons } from './annotator-modes/predictions-buttons.component';
+import { getNextItem } from './util';
 
-import classes from '../media-preview.module.scss';
+import classes from './secondary-toolbar.module.scss';
+
+type AnnotationButtonsProps = {
+    onDeleteItem: ([deletedItem]: string[]) => void;
+    mediaId: string;
+    onSubmit: () => void;
+    isDisabled: boolean;
+    isSaving: boolean;
+};
+
+const AnnotationButtons = ({ onDeleteItem, mediaId, onSubmit, isDisabled, isSaving }: AnnotationButtonsProps) => {
+    return (
+        <>
+            <DeleteMediaItem itemsIds={[mediaId]} onDeleted={onDeleteItem} />
+            <Button variant='accent' onPress={onSubmit} isPending={isSaving} isDisabled={isDisabled}>
+                Submit
+            </Button>
+        </>
+    );
+};
 
 type SecondaryToolbarProps = {
-    items: DatasetItem[];
-    mediaItem: DatasetItem;
+    items: Media[];
+    mediaItem: Media;
+    mode: AnnotatorMode;
     onClose: () => void;
-    onSelectedMediaItem: (item: DatasetItem) => void;
+    onSelectedMediaItem: (item: Media) => void;
+    onModeChange: (mode: AnnotatorMode) => void;
+    onSelectNextMediaItem: () => void;
+    subset: DatasetSubset;
+    hasSubsetChanged: boolean;
+    isLoadingPredictions: boolean;
 };
 
-const getNextItem = (totalItems: number, newIndex: number) => {
-    return Math.min(totalItems, newIndex + 1);
-};
+export const SecondaryToolbar = ({
+    items,
+    mediaItem,
+    mode,
+    onClose,
+    onSelectedMediaItem,
+    onModeChange,
+    onSelectNextMediaItem,
+    subset,
+    hasSubsetChanged = false,
+    isLoadingPredictions = false,
+}: SecondaryToolbarProps) => {
+    const { data: selectedProject } = useProject();
+    const videoPlayerContext = useVideoPlayerContext();
+    const isPlaying = videoPlayerContext?.videoControls?.isPlaying ?? false;
 
-const invalidateMediaItemAnnotations = (queryClient: QueryClient) => {
-    queryClient.invalidateQueries({
-        queryKey: ['get', '/api/projects/{project_id}/dataset/items/{dataset_item_id}/annotations'],
-    });
-};
-
-export const SecondaryToolbar = ({ items, mediaItem, onClose, onSelectedMediaItem }: SecondaryToolbarProps) => {
-    const queryClient = useQueryClient();
-    const { annotations, isSaving, submitAnnotations } = useAnnotationActions();
-    const { selectedLabel, setSelectedLabelId } = useAnnotator();
-    const { isHidden, projectLabels } = useSecondaryToolbarState();
-
-    const hasAnnotations = !isEmpty(annotations);
-    const selectedIndex = items.findIndex((item) => item.id === mediaItem.id);
+    const { canSubmit, isSaving, submitAnnotations, initialAnnotations, initialPredictions } = useAnnotationActions();
 
     const handleSubmit = async () => {
-        await submitAnnotations();
-
-        const nextItem = getNextItem(items.length - 1, selectedIndex);
-        onSelectedMediaItem(items[nextItem]);
-
-        const isLastItem = selectedIndex === items.length - 1;
-        isLastItem && invalidateMediaItemAnnotations(queryClient);
+        await submitAnnotations(subset);
+        onSelectNextMediaItem();
     };
+
+    const isClassification = isClassificationTask(selectedProject.task.task_type);
+    const isMultiLabelClassification = isMultiLabelClassificationTask(selectedProject.task);
 
     const handleDeleteItem = ([deletedItem]: string[], totalItems: number) => {
         const deletedIndex = items.findIndex((item) => item.id === deletedItem);
@@ -57,42 +87,73 @@ export const SecondaryToolbar = ({ items, mediaItem, onClose, onSelectedMediaIte
         onSelectedMediaItem(items[nextItem]);
     };
 
+    const isPredictionMode = mode === 'prediction';
+    const isAnnotationMode = mode === 'annotation';
+
+    // If annotations are not changed but subset has changed we want to allow user to submit
+    const isSubmitDisabled = (!canSubmit && !hasSubsetChanged) || isSaving || isLoadingPredictions;
+
     return (
         <Flex
-            height={'100%'}
             width={'100%'}
+            height={'100%'}
             alignItems={'center'}
-            UNSAFE_style={{ paddingTop: dimensionValue('size-125') }}
+            justifyContent={'space-between'}
+            UNSAFE_className={classes.secondaryToolbarContainer}
         >
-            <Grid width={'100%'} UNSAFE_className={classes.toolbarGrid} isHidden={isHidden}>
-                <Flex width={'100%'} UNSAFE_className={classes.toolbarSection} justifyContent={'space-between'}>
-                    <LabelPicker
-                        selectedLabel={selectedLabel}
-                        labels={projectLabels}
-                        onSelect={(value) => setSelectedLabelId(value !== null ? String(value) : null)}
-                    />
-
-                    <ButtonGroup>
-                        <DeleteMediaItem
-                            itemsIds={[String(mediaItem.id)]}
-                            onDeleted={([deletedItem]: string[]) => handleDeleteItem([deletedItem], items.length - 1)}
+            <Toolbar.Container>
+                <Toolbar.Section>
+                    <Flex alignItems={'center'} gap={'size-200'}>
+                        <AnnotatorModes
+                            // We want to reset annotation and/or prediction cue when media item changes
+                            key={isVideoFrame(mediaItem) ? `${mediaItem.id}-${mediaItem.frame_number}` : mediaItem.id}
+                            mode={mode}
+                            onModeChange={onModeChange}
+                            hasAnnotations={!isEmpty(initialAnnotations)}
+                            hasPredictions={!isEmpty(initialPredictions)}
                         />
-                        <Button
-                            variant='accent'
-                            onPress={handleSubmit}
-                            isPending={isSaving}
-                            marginStart={'size-200'}
-                            isDisabled={!hasAnnotations || isSaving}
-                        >
-                            Submit
-                        </Button>
+                        {isPredictionMode && <PredictionModelSelector isDisabled={isLoadingPredictions || isPlaying} />}
+                    </Flex>
+                </Toolbar.Section>
+            </Toolbar.Container>
+            {isAnnotationMode && (
+                <Toolbar.Container>
+                    <Toolbar.Section>
+                        <Labels isClassification={isClassification} isMultiLabel={isMultiLabelClassification} />
+                    </Toolbar.Section>
+                </Toolbar.Container>
+            )}
+            <Toolbar.Container>
+                <Toolbar.Section>
+                    <ButtonGroup UNSAFE_className={classes.buttonsGroup}>
+                        {isPredictionMode && (
+                            <PredictionButtons
+                                onModeChange={onModeChange}
+                                isDisabled={isSubmitDisabled}
+                                onSubmit={handleSubmit}
+                            />
+                        )}
+                        {isAnnotationMode && (
+                            <AnnotationButtons
+                                mediaId={mediaItem.id}
+                                onDeleteItem={(deleteItems) => handleDeleteItem(deleteItems, items.length - 1)}
+                                onSubmit={handleSubmit}
+                                isSaving={isSaving}
+                                isDisabled={isSubmitDisabled}
+                            />
+                        )}
 
-                        <Button variant='secondary' onPress={onClose} isDisabled={isSaving}>
-                            Close
-                        </Button>
+                        <Divider size={'S'} height={'size-400'} width={'size-10'} />
+
+                        <ActionButton isQuiet onPress={onClose} isDisabled={isSaving}>
+                            <Icon height={'size-150'} width={'size-150'}>
+                                <CloseSemiBold />
+                            </Icon>
+                            <Text>Close</Text>
+                        </ActionButton>
                     </ButtonGroup>
-                </Flex>
-            </Grid>
+                </Toolbar.Section>
+            </Toolbar.Container>
         </Flex>
     );
 };

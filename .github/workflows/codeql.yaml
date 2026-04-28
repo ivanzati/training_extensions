@@ -17,7 +17,7 @@ concurrency:
 jobs:
   check_paths:
     name: Check which language should be analyzed by CodeQL
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
     if: github.event_name == 'pull_request'
     outputs:
       run_python: "${{ steps.prepare_outputs.outputs.run_python }}"
@@ -25,14 +25,15 @@ jobs:
       run_actions: "${{ steps.prepare_outputs.outputs.run_actions }}"
       run_rust: "${{ steps.prepare_outputs.outputs.run_rust }}"
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - &checkout
+        name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Get all paths that should trigger the workflow
         id: changed-files-yaml
-        uses: tj-actions/changed-files@e0021407031f5be11a464abee9a0776171c79891 # v47.0.1
+        uses: tj-actions/changed-files@22103cc46bda19c2b464ffe86db46df6922fd323 # v47.0.5
         with:
           files_yaml: |
             python:
@@ -83,7 +84,7 @@ jobs:
 
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
     permissions:
       security-events: write # required to publish sarif
     needs: check_paths
@@ -92,35 +93,28 @@ jobs:
       matrix:
         include:
           - language: actions
-            build-mode: none
             run: ${{ needs.check_paths.outputs.run_actions || 'true' }}
           - language: python
-            build-mode: none
             run: ${{ needs.check_paths.outputs.run_python || 'true' }}
           - language: javascript-typescript
-            build-mode: none
             run: ${{ needs.check_paths.outputs.run_javascript_typescript || 'true' }}
           - language: rust
-            build-mode: none
             run: ${{ needs.check_paths.outputs.run_rust || 'true' }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          persist-credentials: false
+      - *checkout
 
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
+        uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
         if: ${{ matrix.run == 'true' }}
         with:
           languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
+          build-mode: none
           queries: security-extended
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@5d4e8d1aca955e8d8589aabd499c5cae939e33c7 # v4.31.9
+        uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
         if: ${{ matrix.run == 'true' }}
         with:
           category: "/language:${{matrix.language}}"

@@ -3,12 +3,13 @@
 
 import asyncio
 from unittest.mock import Mock
+from uuid import UUID, uuid4
 
 import pytest
 
 from app.core.jobs.control_plane import CancellationResult, JobController, JobQueue
 from app.core.jobs.exec import ThreadRunnerFactory
-from app.core.jobs.models import Job, JobStatus
+from app.core.jobs.models import Job, JobParams, JobStatus, JobType
 from app.core.run import ExecutionContext, RunnableFactory
 
 from .mock_runnable import MockRunnable, RunnableBehaviour
@@ -145,7 +146,63 @@ class TestJobControlPlaneIntegration:
             await fxt_job_controller.stop()
 
     @pytest.mark.asyncio
-    async def test_capacity_management_limits_concurrency(self, fxt_runnable_factory, fxt_job):
+    async def test_metadata_update(self, fxt_runnable_factory, fxt_job):
+        """Test that metadata update successfully propagated from the runnable to the job."""
+        job_queue = JobQueue()
+        runner_factory = ThreadRunnerFactory(fxt_runnable_factory)
+
+        # Create controller with capacity of 1 for clear sequential testing
+        job_controller = JobController(job_queue, runner_factory, max_parallel_jobs=1)
+
+        test_id = uuid4()
+
+        class TestRunnable(MockRunnable):
+            def run(self, ctx: ExecutionContext):
+                for progress, metadata in [(50.0, {"test_id": test_id}), (100.0, None)]:
+                    ctx.report("", progress, metadata)
+
+        class TestParams(JobParams):
+            test_id: UUID | None = None
+
+        job = fxt_job(params=TestParams())
+
+        # Mock factory returns concurrency tracking runnable
+        fxt_runnable_factory.return_value = TestRunnable()
+
+        # Start controller
+        await job_queue.submit(job)
+        await job_controller.start()
+
+        try:
+            # Wait for job to complete with proper timeout
+            await self._wait_for_job_status(job, JobStatus.DONE, timeout=5.0)
+
+            # Verify job completed successfully
+            assert job.status == JobStatus.DONE
+            assert job.progress == 100.0
+            assert job.params == TestParams(test_id=test_id)
+            assert job.started_at is not None
+            assert job.error is None
+
+        finally:
+            await job_controller.stop()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "job_type, expected_max_concurrent",
+        [
+            (JobType.TRAIN, 1),
+            (JobType.QUANTIZE, 3),
+            (JobType.STAGE_DATASET, 3),
+            (JobType.IMPORT_DATASET_AS_NEW_PROJECT, 3),
+            (JobType.PREPARE_DATASET_FOR_IMPORT, 3),
+            (JobType.EXPORT_DATASET, 3),
+            (JobType.IMPORT_DATASET_TO_PROJECT, 3),
+        ],
+    )
+    async def test_capacity_management_limits_concurrency(
+        self, job_type, expected_max_concurrent, fxt_runnable_factory, fxt_job
+    ):
         """Test that capacity management properly limits concurrent execution."""
         job_queue = JobQueue()
         runner_factory = ThreadRunnerFactory(fxt_runnable_factory)
@@ -166,8 +223,7 @@ class TestJobControlPlaneIntegration:
                 try:
                     # Simulate some work
                     for progress in [50.0, 100.0]:
-                        ctx.report("", progress)
-                        ctx.heartbeat()
+                        ctx.report("", progress, None)
                         # Small delay to ensure overlap if running concurrently
                         import time
 
@@ -178,7 +234,7 @@ class TestJobControlPlaneIntegration:
         # Create multiple jobs
         jobs = []
         for i in range(3):
-            job = fxt_job()
+            job = fxt_job(job_type=job_type)
             jobs.append(job)
             await job_queue.submit(job)
 
@@ -192,8 +248,10 @@ class TestJobControlPlaneIntegration:
             for job in jobs:
                 await self._wait_for_job_status(job, JobStatus.DONE, timeout=5.0)
 
-            # Verify capacity was respected (max 1 concurrent)
-            assert max_concurrent == 1, f"Expected max 1 concurrent job, got {max_concurrent}"
+            # Verify capacity was respected
+            assert max_concurrent == expected_max_concurrent, (
+                f"Expected max {expected_max_concurrent} concurrent job, got {max_concurrent}"
+            )
 
             # All jobs should complete
             assert all(job.status == JobStatus.DONE for job in jobs)

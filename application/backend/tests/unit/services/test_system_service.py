@@ -112,6 +112,10 @@ class TestSystemService:
 
             assert len(devices) == 3
 
+    def test_validate_device_auto_always_valid(self, fxt_system_service: SystemService):
+        """Test that AUTO device is always valid"""
+        assert fxt_system_service.validate_device("auto") is True
+
     def test_validate_device_cpu_always_valid(self, fxt_system_service: SystemService):
         """Test that CPU device is always valid"""
         assert fxt_system_service.validate_device("cpu") is True
@@ -197,19 +201,15 @@ class TestSystemService:
 
     def test_validate_device_invalid_type(self, fxt_system_service: SystemService):
         """Test validating invalid device types"""
-        with patch("app.services.system_service.torch") as mock_torch, pytest.raises(ValueError):
-            mock_torch.xpu.is_available.return_value = False
-            mock_torch.cuda.is_available.return_value = False
-
-            assert fxt_system_service.validate_device("cpu-cpu") is False
-            assert fxt_system_service.validate_device("cpu--1") is False
-            assert fxt_system_service.validate_device("cpu-") is False
-            assert fxt_system_service.validate_device("cpu-0.9") is False
-            assert fxt_system_service.validate_device("1") is False
-            assert fxt_system_service.validate_device("-1") is False
-            assert fxt_system_service.validate_device("gpu") is False
-            assert fxt_system_service.validate_device("tpu") is False
-            assert fxt_system_service.validate_device("invalid") is False
+        assert fxt_system_service.validate_device("cpu-cpu") is False
+        assert fxt_system_service.validate_device("cpu--1") is False
+        assert fxt_system_service.validate_device("cpu-") is False
+        assert fxt_system_service.validate_device("cpu-0.9") is False
+        assert fxt_system_service.validate_device("1") is False
+        assert fxt_system_service.validate_device("-1") is False
+        assert fxt_system_service.validate_device("gpu") is False
+        assert fxt_system_service.validate_device("tpu") is False
+        assert fxt_system_service.validate_device("invalid") is False
 
     def test_get_device_info(self, fxt_system_service: SystemService):
         """Test getting device info"""
@@ -245,6 +245,37 @@ class TestSystemService:
         with pytest.raises(ValueError):
             fxt_system_service.get_device_info("xpu-999")
 
+    @pytest.mark.parametrize(
+        "raw_device_name, expected_ov_device_name",
+        [
+            ("auto", "AUTO"),
+            ("cpu", "CPU"),
+            ("xpu", "GPU.0"),  # default to GPU.0 if index is not specified
+            ("xpu-0", "GPU.0"),
+            ("xpu-1", "GPU.1"),
+        ],
+    )
+    def test_get_ov_device_name(
+        self, fxt_system_service: SystemService, raw_device_name, expected_ov_device_name
+    ) -> None:
+        """Test conversion of raw device names to OpenVINO device names."""
+        mock_xpu_dp = MagicMock()
+        mock_xpu_dp.name = "Intel(R) Graphics [0x7d41]"
+        mock_xpu_dp.total_memory = 36022263808
+        with patch("app.services.system_service.torch") as mock_torch:
+            mock_torch.cuda.is_available.return_value = False
+            mock_torch.xpu.is_available.return_value = True
+            mock_torch.xpu.device_count.return_value = 2
+            mock_torch.xpu.get_device_properties.return_value = mock_xpu_dp
+
+            geti_device = fxt_system_service.get_device_info(raw_device_name)
+        assert geti_device.as_openvino == expected_ov_device_name
+
+    def test_get_ov_device_name_invalid(self, fxt_system_service: SystemService) -> None:
+        """Test conversion of raw device names to OpenVINO device names."""
+        with pytest.raises(ValueError):
+            _ = fxt_system_service.get_device_info("gpu")
+
     def test_get_camera_devices(self, fxt_system_service: SystemService):
         """Test getting camera devices"""
         with patch("app.services.system_service.enumerate_cameras") as mock_enumerate_cameras:
@@ -258,5 +289,5 @@ class TestSystemService:
             camera_devices = fxt_system_service.get_camera_devices()
 
             assert len(camera_devices) == 1
-            assert camera_devices[0].name == "Integrated Camera"
+            assert camera_devices[0].name == "Integrated Camera [1400]"
             assert camera_devices[0].index == 1400

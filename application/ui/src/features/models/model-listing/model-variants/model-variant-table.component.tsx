@@ -3,75 +3,162 @@
 
 import {
     ActionButton,
-    Button,
     Cell,
     Column,
+    Content,
+    ContextualHelp,
     Flex,
-    Item,
-    Menu,
-    MenuTrigger,
+    Heading,
     Row,
     TableBody,
     TableHeader,
     TableView,
+    Text,
+    toast,
 } from '@geti/ui';
-import { DownloadIcon, MoreMenu } from '@geti/ui/icons';
+import { DownloadIcon } from '@geti/ui/icons';
+import { useProjectIdentifier } from 'hooks/use-project-identifier.hook';
+import { get } from 'lodash-es';
+import { useNumberFormatter } from 'react-aria';
 
-import type { SchemaModelView } from '../../../../api/openapi-spec';
+import { API_BASE_URL } from '../../../../api/client';
+import type { Model, ModelFormat, ModelVariant } from '../../../../constants/shared-types';
+import { downloadFile, formatBytes } from '../../../../shared/util';
+import {
+    getBaselineVariant,
+    getFp32PytorchVariant,
+    getPerformanceColumnName,
+    getPrimaryTestingMetricValue,
+    getVariantPerformanceValue,
+} from '../utils/variant-metrics';
+import { ValueWithDelta } from './model-variant-delta.component';
 
-interface ModelVariantTableProps {
-    model: SchemaModelView;
-}
+type ModelVariantTableProps = {
+    model: Model;
+    format: ModelFormat;
+};
 
-export const ModelVariantTable = ({ model }: ModelVariantTableProps) => {
-    // TODO: Replace with dynamic data
+type ModelVariantPrecisionRendererProps = {
+    variant: ModelVariant;
+};
+
+const ModelVariantPrecisionRenderer = ({ variant }: ModelVariantPrecisionRendererProps) => {
+    const numberFormatter = useNumberFormatter({
+        style: 'percent',
+        maximumFractionDigits: 1,
+    });
+
+    if (variant.quantization_info == null) {
+        return <Text>{variant.precision.toUpperCase()}</Text>;
+    }
+
+    const quantizationParameters = {
+        maxDrop: get(variant.quantization_info, 'max_drop', null),
+        maxCalibrationSubsetSize: get(variant.quantization_info, 'max_calibration_subset_size', null),
+    };
+
+    const maxAccuracyDrop = quantizationParameters.maxDrop === null ? null : Number(quantizationParameters.maxDrop);
+    const calibrationDatasetSize =
+        quantizationParameters.maxCalibrationSubsetSize === null
+            ? null
+            : Number(quantizationParameters.maxCalibrationSubsetSize);
+
+    return (
+        <Flex direction={'row'} gap={'size-100'}>
+            <Text>{variant.precision.toUpperCase()}</Text>
+            {(calibrationDatasetSize || maxAccuracyDrop) && (
+                <ContextualHelp variant={'info'} placement={'top'}>
+                    <Heading>Quantized with NNCF PTQ</Heading>
+                    <Content>
+                        <Flex direction={'column'}>
+                            {maxAccuracyDrop !== null && (
+                                <Text>Max accuracy drop: {numberFormatter.format(maxAccuracyDrop)}</Text>
+                            )}
+                            {calibrationDatasetSize != null && (
+                                <Text>Calibration dataset size: {calibrationDatasetSize}</Text>
+                            )}
+                        </Flex>
+                    </Content>
+                </ContextualHelp>
+            )}
+        </Flex>
+    );
+};
+
+export const ModelVariantTable = ({ model, format }: ModelVariantTableProps) => {
+    const projectId = useProjectIdentifier();
+
+    const allVariants = model.variants ?? [];
+    const variants = allVariants.filter((variant) => variant.format === format);
+    const baselineVariant = getBaselineVariant(variants);
+    const fp32PytorchVariant = getFp32PytorchVariant(allVariants);
+
+    const fp32PytorchMetric = getPrimaryTestingMetricValue(fp32PytorchVariant);
+    const performanceColumnName = getPerformanceColumnName(variants, fp32PytorchMetric);
+    const baselinePerformanceValue = baselineVariant
+        ? getVariantPerformanceValue(baselineVariant, fp32PytorchMetric)
+        : undefined;
+
+    const handleDownloadModel = (modelVariantId: string) => {
+        toast({ type: 'info', message: 'Model download started...please wait.' });
+
+        const url = `${API_BASE_URL}/api/projects/${projectId}/models/${model.id}/variants/${modelVariantId}/binary`;
+        downloadFile(url);
+    };
 
     return (
         <TableView aria-label={`Model variants for ${model.id}`} overflowMode={'wrap'} density={'compact'}>
             <TableHeader>
-                <Column isRowHeader>Optimized models</Column>
-                <Column isRowHeader>License</Column>
-                <Column isRowHeader>Precision</Column>
-                <Column isRowHeader>Accuracy</Column>
-                <Column isRowHeader>Size</Column>
+                <Column isRowHeader>PRECISION</Column>
+                <Column isRowHeader>SIZE</Column>
+                <Column isRowHeader>{performanceColumnName}</Column>
                 <Column align='end'>
                     <></>
                 </Column>
             </TableHeader>
-            <TableBody>
-                <Row>
-                    <Cell>MobileNetV2-ATSS OpenVINO FP16</Cell>
-                    <Cell>Apache 2.0</Cell>
-                    <Cell>FP16</Cell>
-                    <Cell>95%</Cell>
-                    <Cell>335.81 MB</Cell>
-                    <Cell>
-                        <Flex gap={'size-100'} justifyContent='end' alignItems='center'>
-                            <ActionButton isQuiet>
-                                <DownloadIcon />
-                            </ActionButton>
-                            <MenuTrigger>
-                                <ActionButton isQuiet>
-                                    <MoreMenu />
-                                </ActionButton>
-                                <Menu>
-                                    <Item key='delete'>Delete</Item>
-                                    <Item key='export'>Export</Item>
-                                </Menu>
-                            </MenuTrigger>
-                        </Flex>
-                    </Cell>
-                </Row>
-                <Row>
-                    <Cell>MobileNetV2-ATSS OpenVINO FP16</Cell>
-                    <Cell>Apache 2.0</Cell>
-                    <Cell>FP16</Cell>
-                    <Cell>95%</Cell>
-                    <Cell>335.81 MB</Cell>
-                    <Cell>
-                        <Button variant='primary'>Start quantization</Button>
-                    </Cell>
-                </Row>
+            <TableBody items={variants}>
+                {(variant) => {
+                    const performanceValue = getVariantPerformanceValue(variant, fp32PytorchMetric);
+                    const isBaselineVariant = variant.id === baselineVariant?.id;
+
+                    return (
+                        <Row key={variant.id}>
+                            <Cell>
+                                <ModelVariantPrecisionRenderer variant={variant} />
+                            </Cell>
+                            <Cell>
+                                <ValueWithDelta
+                                    value={variant.weights_size}
+                                    baselineValue={baselineVariant?.weights_size}
+                                    changeType='size'
+                                    displayValue={formatBytes(variant.weights_size)}
+                                    showDelta={!isBaselineVariant}
+                                    precision={variant.precision}
+                                />
+                            </Cell>
+                            <Cell>
+                                <ValueWithDelta
+                                    value={performanceValue}
+                                    baselineValue={baselinePerformanceValue}
+                                    displayValue={performanceValue === undefined ? '-' : `${performanceValue}%`}
+                                    showDelta={!isBaselineVariant}
+                                    precision={variant.precision}
+                                />
+                            </Cell>
+                            <Cell>
+                                <Flex gap={'size-100'} justifyContent='end' alignItems='center'>
+                                    <ActionButton
+                                        isQuiet
+                                        aria-label={`Download model ${variant.id}`}
+                                        onPress={() => handleDownloadModel(variant.id)}
+                                    >
+                                        <DownloadIcon />
+                                    </ActionButton>
+                                </Flex>
+                            </Cell>
+                        </Row>
+                    );
+                }}
             </TableBody>
         </TableView>
     );

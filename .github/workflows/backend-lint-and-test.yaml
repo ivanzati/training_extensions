@@ -1,22 +1,20 @@
-name: Geti Tune server checks
+name: Geti server checks
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - develop
-      - release/**
-    tags:
-      - "v*"
-  pull_request:
   merge_group:
     branches:
       - develop
       - release/**
+  push:
+    tags:
+      - "v*"
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
 
 permissions: {} # No permissions by default on workflow level
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: backend-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -25,55 +23,48 @@ jobs:
   # If PR or merge_group -> run only if files in specified paths changed
   check_paths:
     name: Check if workflow should run
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
     outputs:
-      run_workflow: ${{ steps.run_workflow.outputs.run }}
+      run_workflow: ${{ steps.check_paths.outputs.run }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - &checkout
+        name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Get all paths that should trigger the workflow
-        id: changed-files-yaml
-        uses: tj-actions/changed-files@e0021407031f5be11a464abee9a0776171c79891 # v47.0.1
+      - name: Check paths
+        id: check_paths
+        uses: ./.github/actions/check-paths
         with:
           files_yaml: |
             test:
               - application/backend/**
+              - library/**
               - .github/**
 
-      - name: Set run flag
-        id: run_workflow
-        run: |
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ steps.changed-files-yaml.outputs.test_any_changed }}" = "true" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-
   python-checks:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: ["ubuntu", "windows"]
+    # Use more descriptive job name for better visibility in CI results
+    # Overflow labeled runner is equivalent to ubuntu-latest in terms of resources
+    name: python-${{ matrix.os }}-checks
+    runs-on: ${{ matrix.os == 'ubuntu' && (github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest') || 'windows-latest' }}
     needs: check_paths
     if: needs.check_paths.outputs.run_workflow == 'true'
     permissions:
       contents: read # to checkout code
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          persist-credentials: false
+      - *checkout
 
-      - name: Install uv and set the Python version
-        uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+      - name: Install Python, uv and Just
+        uses: ./.github/actions/install-common-deps
         with:
-          version: "0.9.7"
-          enable-cache: false
-          python-version: "3.13"
+          uv-version-file: application/backend/pyproject.toml # Install the uv version specified in pyproject.toml
 
       - name: Install OpenCV dependencies
+        if: matrix.os == 'ubuntu'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -82,42 +73,35 @@ jobs:
 
       - name: Prepare venv and install Python dependencies
         working-directory: application/backend
-        run: |
-          uv lock --check
-          uv sync --frozen --extra cpu --extra mqtt
+        env:
+          GIT_LFS_SKIP_SMUDGE: "1" # Skip downloading LFS files for deps installed via git
+        run: just venv
 
-      - name: Check formatting with ruff
+      - name: Run linters and type-checkers
+        if: matrix.os == 'ubuntu'
         working-directory: application/backend
-        run: |
-          uv run ruff check --output-format=github .
-          uv run ruff format --check .
-
-      - name: Check imports with import-linter
-        working-directory: application/backend
-        run: |
-          uv run lint-imports
-
-      - name: Check source code with mypy
-        working-directory: application/backend
-        run: |
-          uv run mypy . --config-file=pyproject.toml
+        run: just lint
 
       - name: Run unit tests
         working-directory: application/backend
-        run: |
-          uv run pytest tests/unit
+        run: just test-unit
 
       - name: Run integration tests
         working-directory: application/backend
-        run: |
-          uv run pytest tests/integration
+        run: just test-integration
+
+  # Temporarily skipping BDD tests on CI due to instability and flakiness. Will be re-enabled once the underlying issues are resolved.
+  #      - name: Run bdd tests
+  #        if: matrix.os == 'ubuntu'
+  #        working-directory: application/backend
+  #        run: just test-bdd
 
   required_check:
     name: Required Check backend-lint-and-test
     needs:
       - check_paths
       - python-checks
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
     env:
       CHECKS: ${{ join(needs.*.result, ' ') }}
     if: always() && !cancelled()
@@ -127,7 +111,7 @@ jobs:
           for check in ${CHECKS}; do
             echo "::notice::check=${check}"
             if [[ "$check" != "success" && "$check" != "skipped" ]]; then
-              echo "::error ::Required status checks failed. They must succeed before this pull request can be merged."
+              echo "::error::Required status checks failed. They must succeed before this pull request can be merged."
               exit 1
             fi
           done

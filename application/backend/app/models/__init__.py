@@ -1,6 +1,7 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+from .base import BaseEntity
 from .data_collection_policy import (
     ConfidenceThresholdDataCollectionPolicy,
     DataCollectionConfig,
@@ -8,15 +9,23 @@ from .data_collection_policy import (
     DataCollectionPolicyAdapter,
     FixedRateDataCollectionPolicy,
 )
-from .dataset_item import (
-    DatasetItem,
-    DatasetItemAnnotation,
-    DatasetItemAnnotationStatus,
-    DatasetItemFormat,
-    DatasetItemSubset,
+from .dataset import AnnotationType, DatasetFormat, StagedDataset
+from .dataset_item import DatasetItem, DatasetItemAnnotation, DatasetItemAnnotationStatus, DatasetItemSubset
+from .dataset_revision import DatasetRevision
+from .evaluation import EvaluationResult
+from .inference import BatchInferenceInput, BatchInferenceMedia, BatchInferencePrediction, BatchInferenceResult
+from .jobs import (
+    ExportDatasetJob,
+    ExportDatasetJobParams,
+    QuantizationJob,
+    QuantizationJobParams,
+    TrainingJob,
+    TrainingJobParams,
 )
-from .label import Label, LabelReference
-from .model_revision import ModelRevision, TrainingInfo, TrainingStatus
+from .label import Label, LabelReference, LabelUpdateInfo
+from .media import Image, Media, MediaFormat, MediaType, Video, VideoFrame
+from .model_manifest import ModelManifest
+from .model_revision import ModelRevision, ModelVariant, TrainingInfo, TrainingStatus
 from .pipeline import Pipeline, PipelineStatus
 from .project import Project
 from .shape import FullImage, Point, Polygon, Rectangle, Shape
@@ -44,25 +53,42 @@ from .source import (
 from .task import Task, TaskType
 
 __all__ = [
+    "AnnotationType",
+    "BaseEntity",
+    "BatchInferenceInput",
+    "BatchInferenceMedia",
+    "BatchInferencePrediction",
+    "BatchInferenceResult",
     "ConfidenceThresholdDataCollectionPolicy",
     "DataCollectionConfig",
     "DataCollectionPolicy",
     "DataCollectionPolicyAdapter",
+    "DatasetFormat",
     "DatasetItem",
     "DatasetItemAnnotation",
     "DatasetItemAnnotationStatus",
-    "DatasetItemFormat",
     "DatasetItemSubset",
+    "DatasetRevision",
     "DisconnectedSinkConfig",
     "DisconnectedSourceConfig",
+    "EvaluationResult",
+    "ExportDatasetJob",
+    "ExportDatasetJobParams",
     "FixedRateDataCollectionPolicy",
     "FolderSinkConfig",
     "FullImage",
     "IPCameraSourceConfig",
+    "Image",
     "ImagesFolderSourceConfig",
     "Label",
     "LabelReference",
+    "LabelUpdateInfo",
+    "Media",
+    "MediaFormat",
+    "MediaType",
+    "ModelManifest",
     "ModelRevision",
+    "ModelVariant",
     "MqttSinkConfig",
     "OutputFormat",
     "Pipeline",
@@ -70,6 +96,8 @@ __all__ = [
     "Point",
     "Polygon",
     "Project",
+    "QuantizationJob",
+    "QuantizationJobParams",
     "Rectangle",
     "RosSinkConfig",
     "Shape",
@@ -79,11 +107,16 @@ __all__ = [
     "Source",
     "SourceAdapter",
     "SourceType",
+    "StagedDataset",
     "Task",
     "TaskType",
     "TrainingInfo",
+    "TrainingJob",
+    "TrainingJobParams",
     "TrainingStatus",
     "USBCameraSourceConfig",
+    "Video",
     "VideoFileSourceConfig",
+    "VideoFrame",
     "WebhookSinkConfig",
 ]

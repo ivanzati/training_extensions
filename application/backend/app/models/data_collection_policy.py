@@ -7,13 +7,12 @@ from pydantic import BaseModel, Field, TypeAdapter
 
 
 class DataCollectionPolicyBase(BaseModel):
-    type: str
     enabled: bool = True
 
 
 class FixedRateDataCollectionPolicy(DataCollectionPolicyBase):
     type: Literal["fixed_rate"] = "fixed_rate"
-    rate: float
+    rate: float = Field(gt=0)
 
 
 class ConfidenceThresholdDataCollectionPolicy(DataCollectionPolicyBase):

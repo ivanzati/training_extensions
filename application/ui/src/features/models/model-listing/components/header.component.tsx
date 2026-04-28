@@ -1,27 +1,74 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { Flex, Grid, Item, Picker, Text, ToggleButton } from '@geti/ui';
-import { Search } from '@geti/ui/icons';
+import { Key } from 'react';
 
+import { ActionButton, Flex, Grid, Item, Menu, MenuTrigger, Picker } from '@geti/ui';
+import { MoreMenu } from '@geti/ui/icons';
+
+import { TrainModel } from '../../train-model/train-model.component';
+import { useModelListing } from '../provider/model-listing-provider';
 import type { GroupByMode, SortBy } from '../types';
+import { ExpandableSearch } from './expandable-search/expandable-search.component';
 
-interface HeaderProps {
-    groupBy?: GroupByMode;
-    onGroupByChange: (groupBy: GroupByMode) => void;
-    onSortChange: (sortBy: SortBy) => void;
+type MoreOptionsProps = {
     onPinActiveToggle: () => void;
-}
+    pinActive: boolean;
+    showFailedModels: boolean;
+    onToggleShowFailedModels: () => void;
+};
+const MoreOptions = ({
+    onPinActiveToggle,
+    pinActive,
+    showFailedModels,
+    onToggleShowFailedModels,
+}: MoreOptionsProps) => {
+    const handleOptionsAction = (key: Key) => {
+        switch (key) {
+            case 'pin-active':
+                onPinActiveToggle();
+                break;
+            case 'show-failed':
+                onToggleShowFailedModels();
+                break;
+            default:
+                break;
+        }
+    };
 
-export const Header = ({ groupBy, onGroupByChange, onSortChange, onPinActiveToggle }: HeaderProps) => {
+    return (
+        <MenuTrigger>
+            <ActionButton isQuiet aria-label={'Model listing options'}>
+                <MoreMenu />
+            </ActionButton>
+            <Menu onAction={handleOptionsAction} aria-label={'Model listing options menu'}>
+                <Item key={'pin-active'}>{pinActive ? 'Unpin active model from top' : 'Pin active model on top'}</Item>
+                <Item key={'show-failed'}>{showFailedModels ? 'Hide failed models' : 'Show failed models'}</Item>
+            </Menu>
+        </MenuTrigger>
+    );
+};
+
+export const Header = () => {
+    const {
+        groupBy,
+        sortBy,
+        onGroupByChange,
+        onSortChange,
+        onPinActiveToggle,
+        searchBy,
+        onSearchChange,
+        pinActive,
+        showFailedModels,
+        onToggleShowFailedModels,
+    } = useModelListing();
+
     return (
         <Grid columns={['auto auto 1fr auto']} gap={'size-100'} alignItems={'center'}>
-            <Text>Models</Text>
-
-            <Flex marginStart={'size-300'} gap={'size-100'}>
+            <Flex gap={'size-100'}>
                 <Picker
                     placeholder={'Group by'}
-                    width={'size-3000'}
+                    width={'size-2400'}
                     aria-label={'Group models'}
                     selectedKey={groupBy}
                     onSelectionChange={(key) => onGroupByChange(key as GroupByMode)}
@@ -31,27 +78,33 @@ export const Header = ({ groupBy, onGroupByChange, onSortChange, onPinActiveTogg
                 </Picker>
                 <Picker
                     placeholder={'Sort by'}
-                    width={'size-3000'}
+                    width={'size-2000'}
                     aria-label={'Sort models'}
-                    defaultSelectedKey={'trained'}
+                    selectedKey={sortBy}
                     onSelectionChange={(key) => onSortChange(key as SortBy)}
                 >
                     <Item key='name'>Sort: Name</Item>
                     <Item key='trained'>Sort: Trained</Item>
-                    <Item key='architecture'>Sort: Architecture</Item>
+                    {groupBy === 'dataset' ? (
+                        <Item key='architecture'>Sort: Architecture</Item>
+                    ) : (
+                        <Item key='dataset'>Sort: Dataset</Item>
+                    )}
                     <Item key='size'>Sort: Size</Item>
                     <Item key='score'>Sort: Score</Item>
                 </Picker>
             </Flex>
 
-            <Flex>
-                <ToggleButton isEmphasized onChange={onPinActiveToggle}>
-                    Pin active model on top
-                </ToggleButton>
-            </Flex>
+            <MoreOptions
+                onPinActiveToggle={onPinActiveToggle}
+                pinActive={pinActive}
+                showFailedModels={showFailedModels}
+                onToggleShowFailedModels={onToggleShowFailedModels}
+            />
 
-            <Flex>
-                <Search />
+            <Flex marginStart={'auto'} gap={'size-100'}>
+                <ExpandableSearch value={searchBy} onChange={onSearchChange} />
+                <TrainModel />
             </Flex>
         </Grid>
     );

@@ -1,55 +1,95 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
-import { Button, Flex, Loading, toast, View } from '@geti/ui';
-import { Play } from '@geti/ui/icons';
+import { dimensionValue, Flex, Loading, Text, toast, View } from '@geti/ui';
+import { Pause, Play } from '@geti/ui/icons';
+import { clsx } from 'clsx';
 
+import { usePipeline } from '../../../hooks/api/pipeline.hook';
 import { Stream } from './stream';
 import { useWebRTCConnection } from './web-rtc-connection-provider';
 
 import classes from './stream.module.scss';
 
 export const StreamContainer = () => {
-    const [size, setSize] = useState({ height: 608, width: 892 });
-    const { start, status } = useWebRTCConnection();
+    const { start, stop, status, webRTCConnectionRef } = useWebRTCConnection();
+    const { data: pipeline } = usePipeline();
 
-    useEffect(() => {
-        if (status === 'failed') {
-            toast({ type: 'error', message: 'Failed to connect to the stream' });
+    const isPipelineRunning = pipeline?.status === 'running';
+    const isStopped = status === 'idle' || status === 'failed';
+    const isConnecting = status === 'connecting';
+    const isConnected = status === 'connected';
+
+    const [isPaused, setIsPaused] = useState(false);
+
+    const canStart = isStopped && isPipelineRunning;
+
+    const handleClick = async () => {
+        if (isConnected) {
+            setIsPaused(true);
+            await stop();
+        } else if (canStart) {
+            setIsPaused(false);
+            await start();
+
+            if (webRTCConnectionRef.current?.getStatus() === 'failed') {
+                toast({ type: 'error', message: 'Failed to connect to the stream' });
+            }
         }
-    }, [status]);
+    };
 
     return (
         <View gridArea={'canvas'} overflow={'hidden'} maxHeight={'100%'}>
-            {status === 'idle' && (
-                <div className={classes.canvasContainer}>
-                    <View backgroundColor={'gray-200'} width='90%' height='90%'>
-                        <Flex alignItems={'center'} justifyContent={'center'} height='100%'>
-                            <Button onPress={start} UNSAFE_className={classes.playButton} aria-label={'Start stream'}>
-                                <Play width='128px' height='128px' />
-                            </Button>
+            <div className={classes.canvasContainer} onClick={handleClick}>
+                {isStopped && (
+                    <Flex justifyContent={'center'} alignItems={'center'} UNSAFE_className={classes.backdrop}>
+                        <Flex
+                            justifyContent={'center'}
+                            alignItems={'center'}
+                            UNSAFE_className={clsx(classes.playPauseButtonWrapper, {
+                                [classes.playButtonDisabled]: !isPipelineRunning,
+                            })}
+                        >
+                            <Play
+                                color={'currentColor'}
+                                width={dimensionValue('size-400')}
+                                height={dimensionValue('size-400')}
+                                aria-label={isPipelineRunning ? 'Start stream' : 'Enable pipeline to start stream'}
+                                aria-disabled={!isPipelineRunning}
+                            />
+                            <Text UNSAFE_style={{ paddingRight: dimensionValue('size-100') }}>Start stream</Text>
                         </Flex>
-                    </View>
-                </div>
-            )}
+                    </Flex>
+                )}
 
-            {status === 'connecting' && (
-                <div className={classes.canvasContainer}>
-                    <View backgroundColor={'gray-200'} width='90%' height='90%'>
-                        <Flex alignItems={'center'} justifyContent={'center'} height='100%'>
-                            <Loading mode='inline' />
+                {isConnecting && (
+                    <Flex alignItems={'center'} justifyContent={'center'} height='100%'>
+                        <Loading mode='inline' />
+                    </Flex>
+                )}
+
+                {isConnected && (
+                    <>
+                        {!isPaused && <Stream />}
+                        <Flex
+                            alignItems='center'
+                            justifyContent='center'
+                            UNSAFE_className={clsx(classes.pauseFlash, { [classes.pauseFlashActive]: isPaused })}
+                        >
+                            <Flex UNSAFE_className={clsx(classes.playPauseButtonWrapper, classes.pauseFlashButton)}>
+                                <Pause
+                                    color={'currentColor'}
+                                    width={dimensionValue('size-400')}
+                                    height={dimensionValue('size-400')}
+                                    aria-label={'Stream stopped'}
+                                />
+                            </Flex>
                         </Flex>
-                    </View>
-                </div>
-            )}
-
-            {status === 'connected' && (
-                <div className={classes.canvasContainer}>
-                    <Stream size={size} setSize={setSize} />
-                </div>
-            )}
+                    </>
+                )}
+            </div>
         </View>
     );
 };

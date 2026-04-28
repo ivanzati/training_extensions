@@ -1,12 +1,14 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { createBrowserRouter, Navigate } from 'react-router-dom';
+import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
 
 import { paths } from './constants/paths';
-import { SelectedDataProvider } from './features/dataset/selected-data-provider.component';
+import { ImportDatasetDialogStateProvider } from './features/dataset/providers/export-import-dataset-dialog-provider.component';
+import { SelectedDataProvider } from './features/dataset/providers/selected-data-provider.component';
 import { WebRTCConnectionProvider } from './features/inference/stream/web-rtc-connection-provider';
 import { ProjectList } from './features/project/list/project-list.component';
+import { ImportDatasetDialogProvider } from './features/project/providers/import-dataset-dialog-provider.component';
 import { useProjects } from './hooks/api/project.hook';
 import { Layout } from './layout';
 import { Dataset } from './routes/dataset/dataset.component';
@@ -14,7 +16,6 @@ import { ErrorPage } from './routes/error-page/error-page';
 import { Inference } from './routes/inference/inference';
 import { Models } from './routes/models/models';
 import { CreateProject } from './routes/project/create-project';
-import { ViewProject } from './routes/project/view-project';
 import { RootLayout } from './routes/root/root';
 
 const Redirect = () => {
@@ -22,28 +23,24 @@ const Redirect = () => {
 
     const { data: projects } = useProjects();
 
-    // No projects -> Go to create project
-    if (!projects || projects.length === 0) {
-        path = paths.project.new({});
+    // No projects -> fall through to the default path (projects list), letting users create or import a project
 
-        // Only 1 project -> Redirect to the inference page
-    } else if (projects.length === 1) {
+    // Only 1 project -> Redirect to the dataset page
+    if (projects.length === 1) {
         const projectId = projects[0].id;
 
         if (projectId) {
-            path = paths.project.inference({ projectId });
+            path = paths.project.dataset.index({ projectId });
         } else {
             path = paths.project.new({});
         }
-    } else {
-        // More than 1 project -> Redirect the active one
-        // And if none are active, redirect to /projects
+    } else if (projects.length > 1) {
+        // More than 1 project -> Redirect to the active one
+        // And if none are active, fall through to the default path (projects list)
         const projectWithActivePipeline = projects.find((project) => Boolean(project.active_pipeline));
 
         if (projectWithActivePipeline) {
-            path = paths.project.inference({ projectId: projectWithActivePipeline.id });
-        } else {
-            path = paths.project.index({});
+            path = paths.project.dataset.index({ projectId: projectWithActivePipeline.id });
         }
     }
 
@@ -62,7 +59,11 @@ export const router = createBrowserRouter([
             },
             {
                 path: paths.project.index.pattern,
-                element: <ProjectList />,
+                element: (
+                    <ImportDatasetDialogProvider>
+                        <ProjectList />
+                    </ImportDatasetDialogProvider>
+                ),
             },
             {
                 path: paths.project.new.pattern,
@@ -78,25 +79,42 @@ export const router = createBrowserRouter([
                 children: [
                     {
                         index: true,
-                        element: <ViewProject />,
-                    },
-                    {
                         path: paths.project.inference.pattern,
                         element: <Inference />,
                     },
                     {
-                        path: paths.project.dataset.pattern,
+                        path: paths.project.dataset.index.pattern,
                         element: (
-                            <SelectedDataProvider>
-                                <Dataset />
-                            </SelectedDataProvider>
+                            <ImportDatasetDialogStateProvider>
+                                <SelectedDataProvider>
+                                    <Outlet />
+                                </SelectedDataProvider>
+                            </ImportDatasetDialogStateProvider>
                         ),
+                        children: [
+                            {
+                                index: true,
+                                element: <Dataset />,
+                            },
+                            {
+                                path: paths.project.dataset.item.index.pattern,
+                                element: <Dataset />,
+                            },
+                            {
+                                path: paths.project.dataset.item.frame.pattern,
+                                element: <Dataset />,
+                            },
+                        ],
                     },
                     {
                         path: paths.project.models.pattern,
                         element: <Models />,
                     },
                 ],
+            },
+            {
+                path: '*',
+                element: <Redirect />,
             },
         ],
     },

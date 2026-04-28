@@ -1,0 +1,26 @@
+id: object-detection-atss-mobilenet-v2
+name: ATSS-MobileNet-V2
+
+pretrained_weights:
+  url: https://storage.geti.intel.com/weights/mobilenet_v2-atss.pth
+  mirror_url: https://storage.openvinotoolkit.org/repositories/openvino_training_extensions/models/object_detection/v2/mobilenet_v2-atss.pth
+  sha_sum: f0caa5966a77f4f74b1f051f626d942e60b30d53cbf2f7af93fe2951a2295602
+
+description: "ATSS (Adaptive Training Sample Selection) is an anchor-based object detection algorithm that introduces an adaptive strategy for selecting positive and negative samples during training. Instead of using fixed IoU thresholds, ATSS dynamically determines positive samples based on the statistical characteristics of object candidates for each ground truth. This improves training stability and enhances detection performance, especially for objects of varying sizes and aspect ratios."
+stats:
+  gigaflops: 20.6
+  trainable_parameters: 3.9
+  benchmark_metrics:
+    coco_map_50_95: 31.5
+    coco_map_50: 51.0
+
+hyperparameters:
+  training:
+    learning_rate: 0.004
+    weight_decay: 0.0001
+    scheduler:
+      factor: 0.1
+      patience: 4
+    gradient_clip:
+      enable: true
+      max_grad_norm: 35.0

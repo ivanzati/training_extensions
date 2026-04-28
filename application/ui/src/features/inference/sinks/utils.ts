@@ -8,16 +8,16 @@ import type { components } from '../../../api/openapi-spec';
 export type LocalFolderSinkConfig = components['schemas']['FolderSinkConfigView'];
 export type MqttSinkConfig = components['schemas']['MqttSinkConfigView'];
 export type WebhookSinkConfig = components['schemas']['WebhookSinkConfigView'];
+export type DisconnectedSinkConfig = components['schemas']['RosSinkConfigView'];
+export type RosSinkConfig = components['schemas']['RosSinkConfigView'];
 export type SinkOutputFormats = LocalFolderSinkConfig['output_formats'];
 
-export type SinkConfig = LocalFolderSinkConfig | MqttSinkConfig | WebhookSinkConfig;
-
-export enum SinkType {
-    FOLDER = 'folder',
-    MQTT = 'mqtt',
-    ROS = 'ros',
-    WEBHOOK = 'webhook',
-}
+export type SinkConfig =
+    | LocalFolderSinkConfig
+    | MqttSinkConfig
+    | WebhookSinkConfig
+    | DisconnectedSinkConfig
+    | RosSinkConfig;
 
 export enum OutputFormat {
     IMAGE_ORIGINAL = 'image_original',
@@ -33,6 +33,10 @@ export enum WebhookHttpMethod {
 
 const toStringAndTrim = (value: unknown) => String(value).trim();
 
+export const positiveNumberOrUndefined = (value: number | null | undefined): number | undefined => {
+    return typeof value === 'number' && value > 0 ? value : undefined;
+};
+
 export const getObjectFromFormData = (keys: FormDataEntryValue[], values: FormDataEntryValue[]) => {
     const entries = keys.map((key, index) => [key, values[index]]);
     const validEntries = entries.filter(
@@ -42,14 +46,41 @@ export const getObjectFromFormData = (keys: FormDataEntryValue[], values: FormDa
     return Object.fromEntries(validEntries);
 };
 
-export const getLocalFolderData = <T extends { sink_type: string }>(sources: T[]) => {
-    return sources.filter(({ sink_type }) => sink_type === 'folder').at(0) as unknown as LocalFolderSinkConfig;
+export const rateLimitFromFormData = (formData: FormData): number | null => {
+    const samplesValue = formData.get('rate_limit_samples');
+    const secondsValue = formData.get('rate_limit_seconds');
+
+    if (samplesValue === null || secondsValue === null) {
+        return null;
+    }
+
+    const samples = Number(samplesValue);
+    const seconds = Number(secondsValue);
+
+    if (!Number.isFinite(samples) || !Number.isFinite(seconds) || samples <= 0 || seconds <= 0) {
+        return null;
+    }
+
+    return samples / seconds;
 };
 
-export const getMqttData = <T extends { sink_type: string }>(sources: T[]) => {
-    return sources.filter(({ sink_type }) => sink_type === 'mqtt').at(0) as unknown as MqttSinkConfig;
-};
+export const formatRateLimit = (rateLimit?: number | null): string => {
+    const normalizedRateLimit = positiveNumberOrUndefined(rateLimit);
 
-export const getWebhookData = <T extends { sink_type: string }>(sources: T[]) => {
-    return sources.filter(({ sink_type }) => sink_type === 'webhook').at(0) as unknown as WebhookSinkConfig;
+    if (normalizedRateLimit === undefined) {
+        return 'Not set';
+    }
+
+    if (normalizedRateLimit < 1) {
+        const seconds = 1 / normalizedRateLimit;
+        const normalizedSeconds = Math.round(seconds);
+        const secondsLabel = normalizedSeconds === 1 ? 'second' : 'seconds';
+
+        return `1 sample every ${normalizedSeconds} ${secondsLabel}`;
+    }
+
+    const normalizedSamples = Math.round(normalizedRateLimit);
+    const sampleLabel = normalizedSamples === 1 ? 'sample' : 'samples';
+
+    return `${normalizedSamples} ${sampleLabel} every 1 second`;
 };

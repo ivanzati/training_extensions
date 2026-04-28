@@ -1,22 +1,61 @@
 .canvasContainer {
-    display: grid;
-    grid-template-areas: 'innercanvas';
-    overflow: hidden;
-    justify-items: center;
-    align-items: center;
     width: 100%;
     height: 100%;
-}
-
-.canvasItem {
-    grid-area: innercanvas;
-}
-
-.playButton {
-    display: flex;
-    gap: var(--spectrum-global-dimension-size-400);
-    align-items: center;
-    padding: var(--spectrum-global-dimension-size-1200);
+    overflow: hidden;
+    cursor: pointer;
     position: relative;
+}
+
+.backdrop {
+    position: absolute;
+    inset: var(--spectrum-global-dimension-size-400);
+    background-color: var(--spectrum-global-color-gray-100);
+}
+
+.playPauseButtonWrapper {
+    padding: var(--spectrum-global-dimension-size-100);
     border-radius: var(--spectrum-alias-border-radius-medium);
+    background-color: rgba(0, 0, 0, 0.2);
+}
+
+.playButtonDisabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.pauseFlashActive {
+    animation: pauseFlash 3s forwards;
+}
+
+.pauseFlashActive .pauseFlashButton {
+    animation: pausePulse 0.6s ease-in-out 4;
+}
+
+@keyframes pauseFlash {
+    0% {
+        opacity: 1;
+    }
+    67% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+    }
+}
+
+@keyframes pausePulse {
+    0%,
+    100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+}
+
+.pauseFlash {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
 }

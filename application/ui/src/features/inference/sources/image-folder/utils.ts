@@ -1,11 +1,11 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { ImagesFolderSourceConfig } from '../util';
+import type { ImagesFolderSourceConfig } from '../../../../constants/shared-types';
 
 export const getImagesFolderInitialConfig = (): ImagesFolderSourceConfig => ({
     id: '',
-    name: '',
+    name: 'Images folder source',
     source_type: 'images_folder',
     images_folder_path: '',
     ignore_existing_images: false,

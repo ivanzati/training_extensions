@@ -1,54 +1,88 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { Content, Grid, Heading, Text, View } from '@geti/ui';
+import { Suspense, useMemo, useState } from 'react';
+
+import { Content, Flex, Grid, Heading, Loading, Text, View } from '@geti/ui';
+import { useProjects } from 'hooks/api/project.hook';
 import { isEmpty } from 'lodash-es';
 
-import { useProjects } from '../../../hooks/api/project.hook';
-import { NewProjectLink } from './new-project-link.component';
+import { ImportJobsList } from './import-jobs-list/import-jobs-list.component';
+import { NewProjectMenu } from './new-project-menu.component';
 import { ProjectCard } from './project-card.component';
+import { SORT_BY_HANDLERS, SortProjects } from './sort-projects/sort-projects.component';
+import { SortBy } from './sort-projects/utils';
 
 import backgroundStyles from '../project-background.module.scss';
 import classes from './project-list.module.scss';
 
-export const ProjectList = () => {
+const ProjectGrid = () => {
     const projects = useProjects();
+    const [sortBy, setSortBy] = useState<SortBy>('createdAt-descending');
+    const hasProjects = !isEmpty(projects.data);
+
+    const sortedProjects = useMemo(() => {
+        return SORT_BY_HANDLERS[sortBy](projects.data);
+    }, [projects.data, sortBy]);
+
+    const projectNames = projects.data.map((project) => project.name);
 
     return (
-        <View UNSAFE_className={backgroundStyles.projectBackground} paddingTop={'size-1000'} height={'100%'}>
-            <Content height={'100%'} maxHeight={'90vh'} maxWidth={'1052px'} margin={'0 auto'}>
-                <Heading
-                    level={1}
-                    marginBottom={'size-250'}
-                    UNSAFE_style={{
-                        textAlign: 'center',
-                        fontSize: 'var(--spectrum-global-dimension-font-size-700)',
-                    }}
-                >
-                    Projects
-                </Heading>
+        <Flex direction={'column'} gap={'size-100'} height={'100%'}>
+            {hasProjects && <SortProjects sortBy={sortBy} onSort={setSortBy} />}
 
-                <Text UNSAFE_className={classes.description}>
-                    To create a project, start by defining your objectives. Then, design the data flow to ensure proper
-                    processing at each stage. Implement the required tools and technologies for automation, and finally,
-                    test the project to confirm it runs smoothly and meets your goals.
-                </Text>
+            <Grid
+                flex={1}
+                gap={'size-300'}
+                autoRows={'size-2000'}
+                justifyContent={'center'}
+                UNSAFE_style={{ overflowY: 'auto' }}
+                columns={isEmpty(projects.data) ? ['size-3600'] : ['1fr', '1fr']}
+            >
+                <NewProjectMenu />
 
-                <Grid
-                    gap={'size-300'}
-                    marginX={'auto'}
-                    justifyContent={'center'}
-                    columns={isEmpty(projects.data) ? ['size-3600'] : ['1fr', '1fr']}
-                    UNSAFE_style={{ overflow: 'auto' }}
-                    maxHeight={'75vh'}
-                    height={'100%'}
-                    autoRows={'size-2400'}
-                >
-                    <NewProjectLink />
-                    {projects.data.map((item) => (
-                        <ProjectCard key={item.id} item={item} />
-                    ))}
-                </Grid>
+                {sortedProjects.map((item, index) => (
+                    <ProjectCard
+                        key={item.id}
+                        item={item}
+                        prioritizeImage={index === 0}
+                        projectNames={projectNames.filter((projectName) => projectName !== item.name)}
+                    />
+                ))}
+            </Grid>
+        </Flex>
+    );
+};
+
+export const ProjectList = () => {
+    return (
+        <View UNSAFE_className={backgroundStyles.projectBackground} height={'100%'}>
+            <Content height={'100%'} maxWidth={'1052px'} margin={'0 auto'} UNSAFE_className={classes.content}>
+                <Flex direction={'column'} height={'100%'}>
+                    <ImportJobsList />
+
+                    <Heading
+                        level={1}
+                        marginBottom={'size-250'}
+                        UNSAFE_style={{
+                            textAlign: 'center',
+                            fontSize: 'var(--spectrum-global-dimension-font-size-700)',
+                        }}
+                    >
+                        Projects
+                    </Heading>
+
+                    <Text UNSAFE_className={classes.description}>
+                        Create projects to configure new computer vision pipelines. <br />
+                        You can switch between the projects at any time to manage the configured pipelines.
+                    </Text>
+
+                    <View flex={1} UNSAFE_style={{ overflow: 'auto' }}>
+                        <Suspense fallback={<Loading size='M' mode='inline' />}>
+                            <ProjectGrid />
+                        </Suspense>
+                    </View>
+                </Flex>
             </Content>
         </View>
     );

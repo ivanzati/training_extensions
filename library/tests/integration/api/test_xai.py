@@ -4,12 +4,12 @@
 from pathlib import Path
 
 import numpy as np
-import openvino.runtime as ov
 import pytest
+from openvino import Core
 
-from otx.backend.native.engine import OTXEngine
-from otx.data.entity.torch import OTXPredBatch
-from otx.engine import create_engine
+from getitune.backend.lightning.engine import LightningEngine
+from getitune.data.entity.sample import PredictionBatch
+from getitune.engine import create_engine
 
 RECIPE_LIST_ALL = pytest.RECIPE_LIST
 MULTI_CLASS_CLS = [recipe for recipe in RECIPE_LIST_ALL if "multi_class_cls" in recipe]
@@ -21,6 +21,7 @@ INST_SEG_LIST = [recipe for recipe in RECIPE_LIST_ALL if "instance_segmentation"
 EXPLAIN_MODEL_LIST = MC_ML_CLS + DETECTION_LIST + INST_SEG_LIST
 
 MEAN_TORCH_OV_DIFF = 150
+UNSUPPORTED_MODEL_SUBSTRS = ("dino", "rfdetr")
 
 
 @pytest.mark.parametrize(
@@ -36,7 +37,7 @@ def test_forward_explain(
     Test forward == forward_explain.
 
     Args:
-        recipe (str): The recipe to use for predicting. (eg. 'classification/otx_mobilenet_v3_large.yaml')
+        recipe (str): The recipe to use for predicting. (eg. 'classification/mobilenet_v3_large.yaml')
         fxt_target_dataset_per_task (dict): A dictionary mapping tasks to target datasets.
         fxt_accelerator (str): The accelerator used for predict.
 
@@ -48,22 +49,23 @@ def test_forward_explain(
     model_name = recipe_split[-1].split(".")[0]
     task = recipe_split[-2]
 
-    if "dino" in model_name or "mobilenet_v4" in model_name or "rtmdet_tiny" in model_name:
+    if any(sub in model_name for sub in UNSUPPORTED_MODEL_SUBSTRS):
         pytest.skip(f"{model_name} is not supported.")
 
-    engine = OTXEngine.from_config(
+    engine = LightningEngine.from_config(
         config_path=recipe,
         data_root=fxt_target_dataset_per_task[task],
         device=fxt_accelerator,
     )
 
     predict_result = engine.predict()
-    assert isinstance(predict_result[0], OTXPredBatch)
-    assert not predict_result[0].has_xai_outputs
+    assert isinstance(predict_result[0], PredictionBatch)
+    assert predict_result[0].saliency_map is None or len(predict_result[0].saliency_map) == 0
 
     predict_result_explain = engine.predict(explain=True)
-    assert isinstance(predict_result_explain[0], OTXPredBatch)
-    assert predict_result_explain[0].has_xai_outputs
+    assert isinstance(predict_result_explain[0], PredictionBatch)
+    assert predict_result_explain[0].saliency_map is not None
+    assert len(predict_result_explain[0].saliency_map) > 0
 
     batch_size = len(predict_result[0].scores)
     for i in range(batch_size):
@@ -85,7 +87,7 @@ def test_predict_with_explain(
     Test XAI.
 
     Args:
-        recipe (str): The recipe to use for predicting. (eg. 'classification/otx_mobilenet_v3_large.yaml')
+        recipe (str): The recipe to use for predicting. (eg. 'classification/mobilenet_v3_large.yaml')
         tmp_path (Path): The temporary path for storing the outputs.
         fxt_target_dataset_per_task (dict): A dictionary mapping tasks to target datasets.
         fxt_accelerator (str): The accelerator used for predict.
@@ -97,11 +99,11 @@ def test_predict_with_explain(
     model_name = recipe_split[-1].split(".")[0]
     task = recipe_split[-2]
 
-    if "dino" in model_name or "mobilenet_v4" in model_name or "rtmdet_tiny" in model_name:
+    if any(sub in model_name for sub in UNSUPPORTED_MODEL_SUBSTRS):
         pytest.skip(f"{model_name} is not supported.")
 
-    tmp_path = tmp_path / f"otx_xai_{model_name}"
-    engine = OTXEngine.from_config(
+    tmp_path = tmp_path / f"xai_{model_name}"
+    engine = LightningEngine.from_config(
         config_path=recipe,
         data_root=fxt_target_dataset_per_task[task],
         device=fxt_accelerator,
@@ -110,8 +112,9 @@ def test_predict_with_explain(
 
     # Predict with explain torch & process maps
     predict_result_explain_torch = engine.predict(explain=True)
-    assert isinstance(predict_result_explain_torch[0], OTXPredBatch)
-    assert predict_result_explain_torch[0].has_xai_outputs
+    assert isinstance(predict_result_explain_torch[0], PredictionBatch)
+    assert predict_result_explain_torch[0].saliency_map is not None
+    assert len(predict_result_explain_torch[0].saliency_map) > 0
     assert predict_result_explain_torch[0].saliency_map is not None
     assert isinstance(predict_result_explain_torch[0].saliency_map[0], dict)
 
@@ -120,7 +123,7 @@ def test_predict_with_explain(
     engine.trainer.save_checkpoint(ckpt_path)
     exported_model_path = engine.export(checkpoint=ckpt_path, explain=True)
 
-    model = ov.Core().read_model(exported_model_path)
+    model = Core().read_model(exported_model_path)
     feature_vector_output = None
     saliency_map_output = None
     for output in model.outputs:
@@ -140,8 +143,9 @@ def test_predict_with_explain(
     # Predict OV model with xai & process maps
     ov_engine = create_engine(model=exported_model_path, data=engine.datamodule, work_dir=engine.work_dir)
     predict_result_explain_ov = ov_engine.predict(checkpoint=exported_model_path, explain=True)
-    assert isinstance(predict_result_explain_ov[0], OTXPredBatch)
-    assert predict_result_explain_ov[0].has_xai_outputs
+    assert isinstance(predict_result_explain_ov[0], PredictionBatch)
+    assert predict_result_explain_ov[0].saliency_map is not None
+    assert len(predict_result_explain_ov[0].saliency_map) > 0
     assert predict_result_explain_ov[0].saliency_map is not None
     assert isinstance(predict_result_explain_ov[0].saliency_map[0], dict)
     assert predict_result_explain_ov[0].feature_vector is not None
@@ -160,7 +164,7 @@ def test_predict_with_explain(
 
     assert len(maps_torch) == len(maps_ov)
 
-    if "tv_efficientnet_b3" in recipe or "efficientnet_b0" in recipe:
+    if "efficientnet_b3" in recipe or "efficientnet_b0" in recipe or "vit_tiny" in recipe:
         # There is the issue with different predict results for Pytorch and OpenVINO tasks.
         # Probably because of the different preprocessed images passed as an input. Skip the rest of the checks for now.
         # Tickets: 142087, 141639

@@ -19,18 +19,22 @@ from app.services import (
     DatasetRevisionService,
     DatasetService,
     LabelService,
+    MediaPredictionService,
+    MediaService,
     MetricsService,
     ModelService,
     PipelineMetricsService,
     PipelineService,
     ProjectService,
-    ResourceNotFoundError,
     SinkService,
     SourceUpdateService,
+    StagedDatasetService,
     SystemService,
 )
 from app.services.data_collect import DataCollector
 from app.services.event.event_bus import EventBus
+from app.services.inference import InferenceServer
+from app.services.license_service import LicenseService
 from app.services.training_configuration_service import TrainingConfigurationService
 from app.webrtc.manager import WebRTCManager
 
@@ -78,9 +82,24 @@ def get_job_dir(request: Request) -> Path:
     return request.app.state.settings.job_dir
 
 
+def get_staged_datasets_dir(request: Request) -> Path:
+    """Provides the path to the folder where the staged datasets are saved. This path is defined in the app settings."""
+    return request.app.state.settings.staged_datasets_dir
+
+
 def get_ice_servers(request: Request) -> list[dict]:
     """Provides the ICE servers from settings."""
     return request.app.state.settings.ice_servers
+
+
+def get_inference_media_limit(request: Request) -> int:
+    """Provides the inference media limit from settings."""
+    return request.app.state.settings.inference_media_limit
+
+
+def get_inference_model_ttl(request: Request) -> int:
+    """Provides the inference model TTL from settings."""
+    return request.app.state.settings.inference_model_ttl
 
 
 def get_event_bus(request: Request) -> EventBus:
@@ -91,6 +110,11 @@ def get_event_bus(request: Request) -> EventBus:
 def get_data_collector(request: Request) -> DataCollector:
     """Provides an DataCollector instance."""
     return request.app.state.data_collector
+
+
+def get_inference_server(request: Request) -> InferenceServer:
+    """Provides an InferenceServer instance."""
+    return request.app.state.inference_server
 
 
 def get_metrics_service(scheduler: Annotated[Scheduler, Depends(get_scheduler)]) -> MetricsService:
@@ -167,13 +191,40 @@ def get_project_service(
     )
 
 
-def get_dataset_service(
+def get_media_service(
     data_dir: Annotated[Path, Depends(get_data_dir)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MediaService:
+    """Provides a MediaService instance."""
+    return MediaService(data_dir=data_dir, db_session=db)
+
+
+def get_dataset_service(
     label_service: Annotated[LabelService, Depends(get_label_service)],
+    media_service: Annotated[MediaService, Depends(get_media_service)],
     db: Annotated[Session, Depends(get_db)],
 ) -> DatasetService:
     """Provides a DatasetService instance."""
-    return DatasetService(data_dir=data_dir, label_service=label_service, db_session=db)
+    return DatasetService(label_service=label_service, media_service=media_service, db_session=db)
+
+
+def get_media_prediction_service(
+    label_service: Annotated[LabelService, Depends(get_label_service)],
+    media_service: Annotated[MediaService, Depends(get_media_service)],
+    dataset_service: Annotated[DatasetService, Depends(get_dataset_service)],
+    inference_server: Annotated[InferenceServer, Depends(get_inference_server)],
+    inference_model_ttl: Annotated[int, Depends(get_inference_model_ttl)],
+    db: Annotated[Session, Depends(get_db)],
+) -> MediaPredictionService:
+    """Provides a MediaPredictionService instance."""
+    return MediaPredictionService(
+        label_service=label_service,
+        media_service=media_service,
+        dataset_service=dataset_service,
+        inference_server=inference_server,
+        inference_model_ttl=inference_model_ttl,
+        db_session=db,
+    )
 
 
 def get_dataset_revision_service(
@@ -189,10 +240,7 @@ def get_project(
     project_service: Annotated[ProjectService, Depends(get_project_service)],
 ) -> Project:
     """Provides a ProjectView instance for request scoped project."""
-    try:
-        return project_service.get_project_by_id(project_id)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return project_service.get_project_by_id(project_id)
 
 
 def get_sink(
@@ -200,10 +248,7 @@ def get_sink(
     sink_service: Annotated[SinkService, Depends(get_sink_service)],
 ) -> Sink:
     """Provides a Sink instance for request scoped sink."""
-    try:
-        return sink_service.get_by_id(sink_id)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return sink_service.get_by_id(sink_id)
 
 
 def get_source(
@@ -211,15 +256,27 @@ def get_source(
     source_update_service: Annotated[SourceUpdateService, Depends(get_source_update_service)],
 ) -> Source:
     """Provides a Source instance for request scoped source."""
-    try:
-        return source_update_service.get_by_id(source_id)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return source_update_service.get_by_id(source_id)
 
 
 def get_base_weights_service(data_dir: Annotated[Path, Depends(get_data_dir)]) -> BaseWeightsService:
     """Provides a BaseWeightsService instance for managing base weights."""
     return BaseWeightsService(data_dir)
+
+
+def get_license_service(
+    data_dir: Annotated[Path, Depends(get_data_dir)],
+    request: Request,
+) -> LicenseService:
+    """Provides a LicenseService instance for tracking license consent."""
+    return LicenseService(data_dir=data_dir, app_version=request.app.state.settings.version)
+
+
+def get_staged_dataset_service(
+    staged_datasets_dir: Annotated[Path, Depends(get_staged_datasets_dir)],
+) -> StagedDatasetService:
+    """Provides a StagedDatasetService instance for managing staged datasets."""
+    return StagedDatasetService(staged_datasets_dir)
 
 
 def get_job_queue(request: Request) -> JobQueue:
@@ -241,7 +298,4 @@ def get_dataset_revision(
     dataset_revision_service: Annotated[DatasetRevisionService, Depends(get_dataset_revision_service)],
 ) -> DatasetRevision:
     """Provides a DatasetService instance."""
-    try:
-        return dataset_revision_service.get_dataset_revision(project_id=project_id, revision_id=dataset_revision_id)
-    except ResourceNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return dataset_revision_service.get_dataset_revision(project_id=project_id, revision_id=dataset_revision_id)

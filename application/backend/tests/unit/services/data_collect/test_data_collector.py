@@ -2,32 +2,40 @@
 # SPDX-License-Identifier: Apache-2.0
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import ANY, MagicMock, patch
-from uuid import uuid4
+from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pydantic_core
 import pytest
 import time_machine
 
-from app.models import (
-    ConfidenceThresholdDataCollectionPolicy,
-    DatasetItemAnnotation,
-    DatasetItemFormat,
-    FixedRateDataCollectionPolicy,
-    FullImage,
-    Label,
-    LabelReference,
-)
-from app.services import DatasetService, LabelService
+from app.models import ConfidenceThresholdDataCollectionPolicy, FixedRateDataCollectionPolicy
+from app.models.media import ImageFormat
+from app.services import DatasetService, MediaService
 from app.services.data_collect.data_collector import (
     ConfidenceThresholdPolicyChecker,
     DataCollector,
     FixedRatePolicyChecker,
 )
+from app.services.media_service import ImageMetadata
 
 
 class TestFixedRatePolicyCheckerUnit:
     """Unit tests for FixedRatePolicyChecker."""
+
+    def test_zero_rate_raises_error_in_policy(self):
+        # Arrange, Act and Assert
+        with pytest.raises(pydantic_core.ValidationError):
+            FixedRateDataCollectionPolicy(rate=0)  # type: ignore[bad_argument_type]
+
+    def test_zero_rate_raises_error_in_checker(self):
+        # Arrange
+        policy = FixedRateDataCollectionPolicy(rate=0.1)
+        policy.rate = 0
+
+        # Act and Assert
+        with pytest.raises(ValueError):
+            FixedRatePolicyChecker(policy)
 
     def test_should_collect_true(self):
         # Arrange
@@ -111,7 +119,6 @@ class TestDataCollectorUnit:
         # Act
         with (
             patch.object(DatasetService, "create_dataset_item") as mock_create_dataset_item,
-            patch("app.services.data_collect.data_collector.convert_prediction") as mock_convert_prediction,
         ):
             fxt_data_collector.collect(
                 timestamp=now + 1,
@@ -120,7 +127,6 @@ class TestDataCollectorUnit:
             )
 
         # Assert
-        mock_convert_prediction.assert_not_called()
         mock_create_dataset_item.assert_not_called()
 
     @time_machine.travel("2025-01-01 00:00:01 +0000", tick=False)
@@ -132,9 +138,10 @@ class TestDataCollectorUnit:
         pipeline = MagicMock()
         pipeline.data_collection.max_dataset_size = None  # No limit
         project = MagicMock()
-        label = MagicMock(spec=Label)
         frame_data = np.random.randint(low=0, high=255, size=(100, 100), dtype=np.uint8)
         inference_data = MagicMock()
+
+        media = MagicMock()
 
         now = datetime.timestamp(datetime.now())
 
@@ -144,16 +151,12 @@ class TestDataCollectorUnit:
         fxt_data_collector.policy_checkers = [policy_checker]
         fxt_data_collector.should_collect_next_frame = True
 
-        annotations = [DatasetItemAnnotation(labels=[LabelReference(id=uuid4())], shape=FullImage())]
-
         # Act
         with (
+            patch.object(MediaService, "create_image") as mock_create_image,
             patch.object(DatasetService, "create_dataset_item") as mock_create_dataset_item,
-            patch.object(LabelService, "list_all", return_value=[label]) as mock_list_all,
-            patch(
-                "app.services.data_collect.data_collector.convert_prediction", return_value=annotations
-            ) as mock_convert_prediction,
         ):
+            mock_create_image.return_value = media
             fxt_data_collector.collect(
                 timestamp=now,
                 frame_data=frame_data,
@@ -161,19 +164,19 @@ class TestDataCollectorUnit:
             )
 
         # Assert
-        mock_list_all.assert_called_once_with(project_id=project.id)
-        mock_convert_prediction.assert_called_once_with(
-            labels=[label], frame_data=ANY, prediction=inference_data.prediction
-        )
+        mock_create_image.assert_called_once()
+        metadata: ImageMetadata = mock_create_image.call_args.args[0]
+        assert metadata.project_id == project.id
+        assert metadata.name == "1735689601_0000"
+        assert metadata.image_format == ImageFormat.JPG
+        assert metadata.source_id == pipeline.source_id
+        assert metadata.data is not None
         mock_create_dataset_item.assert_called_once_with(
-            project=project,
-            name="1735689601_0000",
-            format=DatasetItemFormat.JPG,
-            data=ANY,
+            project_id=project.id,
+            task=project.task,
+            media=media,
             user_reviewed=False,
-            source_id=pipeline.source_id,
-            prediction_model_id=inference_data.model_id,
-            annotations=annotations,
+            annotations=None,
         )
 
     @time_machine.travel("2025-01-01 00:00:01 +0000", tick=False)
@@ -185,9 +188,10 @@ class TestDataCollectorUnit:
         pipeline = MagicMock()
         pipeline.data_collection.max_dataset_size = None  # No limit
         project = MagicMock()
-        label = MagicMock(spec=Label)
         frame_data = np.random.randint(low=0, high=255, size=(100, 100), dtype=np.uint8)
         inference_data = MagicMock()
+
+        media = MagicMock()
 
         now = datetime.timestamp(datetime.now())
 
@@ -197,16 +201,12 @@ class TestDataCollectorUnit:
         fxt_data_collector.policy_checkers = [policy_checker]
         fxt_data_collector.should_collect_next_frame = False
 
-        annotations = [DatasetItemAnnotation(labels=[LabelReference(id=uuid4())], shape=FullImage())]
-
         # Act
         with (
+            patch.object(MediaService, "create_image") as mock_create_image,
             patch.object(DatasetService, "create_dataset_item") as mock_create_dataset_item,
-            patch.object(LabelService, "list_all", return_value=[label]) as mock_list_all,
-            patch(
-                "app.services.data_collect.data_collector.convert_prediction", return_value=annotations
-            ) as mock_convert_prediction,
         ):
+            mock_create_image.return_value = media
             fxt_data_collector.collect(
                 timestamp=now,
                 frame_data=frame_data,
@@ -214,19 +214,19 @@ class TestDataCollectorUnit:
             )
 
         # Assert
-        mock_list_all.assert_called_once_with(project_id=project.id)
-        mock_convert_prediction.assert_called_once_with(
-            labels=[label], frame_data=ANY, prediction=inference_data.prediction
-        )
+        mock_create_image.assert_called_once()
+        metadata: ImageMetadata = mock_create_image.call_args.args[0]
+        assert metadata.project_id == project.id
+        assert metadata.name == "1735689601_0000"
+        assert metadata.image_format == ImageFormat.JPG
+        assert metadata.source_id == pipeline.source_id
+        assert metadata.data is not None
         mock_create_dataset_item.assert_called_once_with(
-            project=project,
-            name="1735689601_0000",
-            format=DatasetItemFormat.JPG,
-            data=ANY,
+            project_id=project.id,
+            task=project.task,
+            media=media,
             user_reviewed=False,
-            source_id=pipeline.source_id,
-            prediction_model_id=inference_data.model_id,
-            annotations=annotations,
+            annotations=None,
         )
 
     @time_machine.travel("2025-01-01 00:00:01 +0000", tick=False)
@@ -253,7 +253,6 @@ class TestDataCollectorUnit:
         with (
             patch.object(DatasetService, "create_dataset_item") as mock_create_dataset_item,
             patch.object(DatasetService, "count_dataset_items", return_value=100) as mock_count_dataset_items,
-            patch("app.services.data_collect.data_collector.convert_prediction") as mock_convert_prediction,
         ):
             fxt_data_collector.collect(
                 timestamp=now,
@@ -263,7 +262,6 @@ class TestDataCollectorUnit:
 
         # Assert: should check count but not create item because limit is reached
         mock_count_dataset_items.assert_called_once_with(project=project)
-        mock_convert_prediction.assert_not_called()
         mock_create_dataset_item.assert_not_called()
 
     @time_machine.travel("2025-01-01 00:00:01 +0000", tick=False)
@@ -275,9 +273,10 @@ class TestDataCollectorUnit:
         pipeline = MagicMock()
         pipeline.data_collection.max_dataset_size = 100  # Set limit
         project = MagicMock()
-        label = MagicMock(spec=Label)
         frame_data = np.random.randint(low=0, high=255, size=(100, 100), dtype=np.uint8)
         inference_data = MagicMock()
+
+        media = MagicMock()
 
         now = datetime.timestamp(datetime.now())
 
@@ -287,17 +286,13 @@ class TestDataCollectorUnit:
         fxt_data_collector.policy_checkers = [policy_checker]
         fxt_data_collector.should_collect_next_frame = False
 
-        annotations = [DatasetItemAnnotation(labels=[LabelReference(id=uuid4())], shape=FullImage())]
-
         # Act
         with (
+            patch.object(MediaService, "create_image") as mock_create_image,
             patch.object(DatasetService, "create_dataset_item") as mock_create_dataset_item,
             patch.object(DatasetService, "count_dataset_items", return_value=50) as mock_count_dataset_items,
-            patch.object(LabelService, "list_all", return_value=[label]) as mock_list_all,
-            patch(
-                "app.services.data_collect.data_collector.convert_prediction", return_value=annotations
-            ) as mock_convert_prediction,
         ):
+            mock_create_image.return_value = media
             fxt_data_collector.collect(
                 timestamp=now,
                 frame_data=frame_data,
@@ -306,6 +301,5 @@ class TestDataCollectorUnit:
 
         # Assert: should check count and create item because under limit
         mock_count_dataset_items.assert_called_once_with(project=project)
-        mock_list_all.assert_called_once_with(project_id=project.id)
-        mock_convert_prediction.assert_called_once()
         mock_create_dataset_item.assert_called_once()
+        mock_create_image.assert_called_once()

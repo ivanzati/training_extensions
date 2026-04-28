@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from app.models import DataCollectionConfig, ModelRevision, PipelineStatus
+from app.models.model_revision import ModelVariant
 
 from .sink import SinkView
 from .source import SourceView
@@ -16,6 +17,7 @@ class PipelineView(BaseModel):
     source: SourceView | None = None  # None if disconnected
     sink: SinkView | None = None  # None if disconnected
     model_revision: ModelRevision | None = Field(default=None, serialization_alias="model")
+    model_variant: ModelVariant | None = Field(default=None)
     status: PipelineStatus = PipelineStatus.IDLE
     data_collection: DataCollectionConfig = Field(default_factory=DataCollectionConfig)
     device: str = Field(default="cpu", description="Inference device (e.g., 'cpu', 'xpu', 'cuda', 'xpu-2', 'cuda-1')")
@@ -40,7 +42,7 @@ class PipelineView(BaseModel):
                 },
                 "model": {
                     "id": "76e07d18-196e-4e33-bf98-ac1d35dca4cb",
-                    "architecture": "Object_Detection_YOLOX_X",
+                    "architecture": "object-detection-yolox-x",
                     "parent_revision": "06091f82-5506-41b9-b97f-c761380df870",
                     "training_info": {
                         "status": "in_progress",

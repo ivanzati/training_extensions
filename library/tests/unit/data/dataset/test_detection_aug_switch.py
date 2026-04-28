@@ -1,52 +1,57 @@
-# Copyright (C) 2025 Intel Corporation
+# Copyright (C) 2025-2026 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-"""Integration tests for OTXDetectionDataset with DataAugSwitchMixin."""
+"""Integration tests for DetectionDataset with DataAugSwitchMixin."""
 
 from multiprocessing import Value
 from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
-from torchvision.transforms.v2 import Compose, ToDtype
 
-from otx.backend.native.callbacks.aug_scheduler import DataAugSwitch
-from otx.data.dataset.detection import OTXDetectionDataset
-from otx.data.dataset.mixins import DataAugSwitchMixin
+from getitune.backend.lightning.callbacks.aug_scheduler import DataAugSwitch
+from getitune.data.dataset.detection import DetectionDataset
+from getitune.data.dataset.mixins import DataAugSwitchMixin
 
 
-class TestOTXDetectionDatasetWithAugSwitch:
-    """Integration tests for OTXDetectionDataset with DataAugSwitchMixin."""
+class TestDetectionDatasetWithAugSwitch:
+    """Integration tests for DetectionDataset with DataAugSwitchMixin."""
 
     @pytest.fixture
     def sample_policies(self):
         """Create sample augmentation policies."""
         return {
             "no_aug": {
-                "to_tv_image": True,
-                "transforms": [
-                    {"class_path": "torchvision.transforms.v2.ToDtype", "init_args": {"dtype": "torch.float32"}},
+                "augmentations_cpu": [
+                    {
+                        "class_path": "getitune.data.augmentation.transforms.Resize",
+                        "init_args": {"size": [640, 640], "keep_aspect_ratio": False},
+                    },
                 ],
             },
             "strong_aug_1": {
-                "to_tv_image": True,
-                "transforms": [
-                    {"class_path": "torchvision.transforms.v2.RandomZoomOut"},
-                    {"class_path": "torchvision.transforms.v2.ToDtype", "init_args": {"dtype": "torch.float32"}},
+                "augmentations_cpu": [
+                    {"class_path": "torchvision.transforms.v2.RandomHorizontalFlip", "init_args": {"p": 0.5}},
+                    {
+                        "class_path": "getitune.data.augmentation.transforms.Resize",
+                        "init_args": {"size": [640, 640], "keep_aspect_ratio": False},
+                    },
                 ],
             },
             "strong_aug_2": {
-                "to_tv_image": False,
-                "transforms": [
-                    {"class_path": "otx.data.transform_libs.torchvision.YOLOXHSVRandomAug"},
-                    {"class_path": "torchvision.transforms.v2.ToDtype", "init_args": {"dtype": "torch.int32"}},
+                "augmentations_cpu": [
+                    {"class_path": "torchvision.transforms.v2.RandomVerticalFlip", "init_args": {"p": 0.5}},
+                    {
+                        "class_path": "getitune.data.augmentation.transforms.Resize",
+                        "init_args": {"size": [640, 640], "keep_aspect_ratio": False},
+                    },
                 ],
             },
             "light_aug": {
-                "to_tv_image": True,
-                "transforms": [
-                    {"class_path": "torchvision.transforms.v2.RandomPhotometricDistort"},
-                    {"class_path": "torchvision.transforms.v2.ToDtype", "init_args": {"dtype": "torch.float32"}},
+                "augmentations_cpu": [
+                    {
+                        "class_path": "getitune.data.augmentation.transforms.Resize",
+                        "init_args": {"size": [640, 640], "keep_aspect_ratio": False},
+                    },
                 ],
             },
         }
@@ -54,12 +59,10 @@ class TestOTXDetectionDatasetWithAugSwitch:
     @pytest.fixture
     def data_aug_switch(self, sample_policies):
         """Create a DataAugSwitch instance."""
-        with patch("otx.data.transform_libs.torchvision.TorchVisionTransformLib.generate") as mock_generate:
-            mock_generate.return_value = Compose([ToDtype(dtype=torch.float32)])
-            switch = DataAugSwitch([4, 29, 50], sample_policies)
-            shared_epoch = Value("i", 0)
-            switch.set_shared_epoch(shared_epoch)
-            return switch
+        switch = DataAugSwitch([4, 29], sample_policies)
+        shared_epoch = Value("i", 0)
+        switch.set_shared_epoch(shared_epoch)
+        return switch
 
     @pytest.fixture
     def mock_dm_subset(self):
@@ -84,14 +87,14 @@ class TestOTXDetectionDatasetWithAugSwitch:
 
     @pytest.fixture
     def detection_dataset(self, mock_dm_subset):
-        """Create an OTXDetectionDataset instance."""
-        return OTXDetectionDataset(
+        """Create an DetectionDataset instance."""
+        return DetectionDataset(
             dm_subset=mock_dm_subset,
             transforms=None,
         )
 
     def test_detection_dataset_inherits_mixin(self, detection_dataset):
-        """Test that OTXDetectionDataset inherits from DataAugSwitchMixin."""
+        """Test that DetectionDataset inherits from DataAugSwitchMixin."""
         assert isinstance(detection_dataset, DataAugSwitchMixin)
 
     def test_detection_dataset_mixin_initialization(self, detection_dataset):
@@ -169,6 +172,8 @@ class TestOTXDetectionDatasetWithAugSwitch:
 
     def test_transforms_updated_correctly(self, detection_dataset, data_aug_switch):
         """Test that transforms are updated correctly when epoch changes."""
+        from getitune.data.augmentation import CPUAugmentationPipeline
+
         detection_dataset.set_data_aug_switch(data_aug_switch)
 
         # Test different epochs and verify transforms update
@@ -187,23 +192,19 @@ class TestOTXDetectionDatasetWithAugSwitch:
             else:
                 assert policy_name == expected_policy_type
 
-            assert detection_dataset.to_tv_image == data_aug_switch.policies[policy_name]["to_tv_image"]
-            assert detection_dataset.transforms == data_aug_switch.policies[policy_name]["transforms"], (
-                f"transforms should be {data_aug_switch.policies[policy_name]['transforms']} but is {detection_dataset.transforms}"
-            )
+            # Verify that the transforms is now the CPU pipeline for this policy
+            assert isinstance(detection_dataset.transforms, CPUAugmentationPipeline)
 
     def test_detection_dataset_without_aug_switch(self, detection_dataset):
         """Test that detection dataset works normally without augmentation switch."""
 
         # Store original transforms
-        original_to_tv_image = detection_dataset.to_tv_image
         original_transforms = detection_dataset.transforms
 
         # Apply augmentation switch (should do nothing)
         detection_dataset._apply_augmentation_switch()
 
         # Verify nothing changed
-        assert detection_dataset.to_tv_image == original_to_tv_image
         assert detection_dataset.transforms == original_transforms
 
     def test_epoch_boundary_conditions(self, detection_dataset, data_aug_switch):
@@ -233,8 +234,8 @@ class TestOTXDetectionDatasetWithAugSwitch:
     def test_multiple_datasets_same_switch(self, mock_dm_subset, data_aug_switch):
         """Test multiple datasets sharing the same augmentation switch."""
         # Create multiple datasets
-        dataset1 = OTXDetectionDataset(dm_subset=mock_dm_subset, transforms=None)
-        dataset2 = OTXDetectionDataset(dm_subset=mock_dm_subset, transforms=None)
+        dataset1 = DetectionDataset(dm_subset=mock_dm_subset, transforms=None)
+        dataset2 = DetectionDataset(dm_subset=mock_dm_subset, transforms=None)
 
         # Set the same switch on both
         dataset1.set_data_aug_switch(data_aug_switch)
@@ -256,24 +257,29 @@ class TestOTXDetectionDatasetWithAugSwitch:
 
     def test_error_handling_without_shared_epoch(self, detection_dataset, sample_policies):
         """Test error handling when DataAugSwitch doesn't have shared epoch set."""
-        with patch("otx.data.transform_libs.torchvision.TorchVisionTransformLib.generate") as mock_generate:
-            mock_generate.return_value = Compose([ToDtype(dtype=torch.float32)])
+        # Create switch without shared epoch
+        switch = DataAugSwitch([4, 29], sample_policies)
+        detection_dataset.set_data_aug_switch(switch)
 
-            # Create switch without shared epoch
-            switch = DataAugSwitch([4, 29, 50], sample_policies)
-            detection_dataset.set_data_aug_switch(switch)
-
-            # This should raise an error when trying to access current_policy_name
-            with pytest.raises(ValueError, match="Shared epoch not set"):
-                detection_dataset._apply_augmentation_switch()
+        # This should raise an error when trying to access current_policy_name
+        with pytest.raises(ValueError, match="Shared epoch not set"):
+            detection_dataset._apply_augmentation_switch()
 
     def test_type_annotations_compatibility(self, detection_dataset):
         """Test that type annotations work correctly with mixin."""
         # This test ensures the type: ignore[misc] comment is working
-        assert isinstance(detection_dataset, OTXDetectionDataset)
+        assert isinstance(detection_dataset, DetectionDataset)
         assert isinstance(detection_dataset, DataAugSwitchMixin)
 
         # Test that all mixin methods are available
         assert callable(detection_dataset.set_data_aug_switch)
         assert callable(detection_dataset._apply_augmentation_switch)
         assert isinstance(detection_dataset.has_dynamic_augmentation, bool)
+
+    def test_transforms_pipeline_switch(self, detection_dataset, data_aug_switch, mocker):
+        """Test that augmentation switch is properly set up on detection dataset."""
+        detection_dataset.set_data_aug_switch(data_aug_switch)
+
+        # Verify that the augmentation switch is set
+        assert detection_dataset.data_aug_switch is data_aug_switch
+        assert detection_dataset.has_dynamic_augmentation is True
