@@ -18,6 +18,7 @@ jobs:
     permissions:
       packages: write
     env:
+      ACTIONS_STEP_DEBUG: true
       GH_TOKEN: ${{ github.token }}
       OWNER: ${{ github.repository_owner }}
       PACKAGE_PREFIX: geti-
@@ -32,6 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          set -x
 
           deleted=0
           candidates=0
@@ -47,7 +49,7 @@ jobs:
             scope_kind="organization"
           else
             # Non-organization owners should use user package APIs.
-            api_scope="user"
+            api_scope="users/${OWNER}"
             scope_kind="user"
           fi
 
