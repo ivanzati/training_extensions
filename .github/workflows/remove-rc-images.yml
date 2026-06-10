@@ -37,7 +37,6 @@ jobs:
           candidates=0
           scanned_packages=0
           owner_type=""
-          is_fork="false"
           api_scope=""
           scope_kind=""
 
@@ -48,11 +47,11 @@ jobs:
             scope_kind="organization"
           else
             # Non-organization owners should use user package APIs.
-            api_scope="users/${OWNER}"
+            api_scope="user"
             scope_kind="user"
           fi
 
-          echo "Owner: ${OWNER} (type=${owner_type}, fork=${is_fork})"
+          echo "Owner: ${OWNER} (type=${owner_type})"
           echo "Using ${scope_kind} package API scope: ${api_scope}"
           echo "Listing container packages for owner '${OWNER}'"
           mapfile -t packages < <(
@@ -105,7 +104,6 @@ jobs:
             echo ""
             echo "- Owner: ${OWNER}"
             echo "- Owner type: ${owner_type}"
-            echo "- Repository fork: ${is_fork}"
             echo "- API scope: ${api_scope}"
             echo "- Package prefix: ${PACKAGE_PREFIX}"
             echo "- Dry run: ${DRY_RUN}"
