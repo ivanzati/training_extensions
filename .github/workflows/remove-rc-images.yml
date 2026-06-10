@@ -1,0 +1,97 @@
+# Copyright (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+name: Remove RC Container Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview deletions without removing image versions"
+        required: false
+        type: boolean
+        default: true
+
+permissions: {} # No permissions by default
+
+jobs:
+  remove-rc-images:
+    name: Delete GHCR RC-tagged images
+    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
+    permissions:
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ORG: ${{ github.repository_owner }}
+      PACKAGE_PREFIX: geti-
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        with:
+          egress-policy: audit
+
+      - name: Delete RC-tagged image versions from GHCR
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          deleted=0
+          candidates=0
+          scanned_packages=0
+
+          echo "Listing container packages for org '${ORG}'"
+          mapfile -t packages < <(
+            gh api --paginate "orgs/${ORG}/packages?package_type=container&per_page=100" \
+              --jq '.[].name' \
+              | grep -E "^${PACKAGE_PREFIX}" || true
+          )
+
+          if [[ "${#packages[@]}" -eq 0 ]]; then
+            echo "No container packages found matching prefix '${PACKAGE_PREFIX}'."
+            {
+              echo "## RC Image Cleanup"
+              echo ""
+              echo "No packages matched prefix '${PACKAGE_PREFIX}'."
+              echo "No image versions were deleted."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          for package in "${packages[@]}"; do
+            scanned_packages=$((scanned_packages + 1))
+            echo "Processing package: ${package}"
+
+            # Select versions where at least one tag matches semver RC format, e.g. 3.0.0rc1.
+            mapfile -t version_ids < <(
+              gh api --paginate "orgs/${ORG}/packages/container/${package}/versions?per_page=100" \
+                --jq '.[] | select((.metadata.container.tags // []) | any(test("^[0-9]+\\.[0-9]+\\.[0-9]+rc[0-9]+$"; "i"))) | .id'
+            )
+
+            if [[ "${#version_ids[@]}" -eq 0 ]]; then
+              echo "No RC-tagged versions found for ${package}"
+              continue
+            fi
+
+            for version_id in "${version_ids[@]}"; do
+              candidates=$((candidates + 1))
+              if [[ "${DRY_RUN}" == "true" ]]; then
+                echo "[dry-run] Would delete ${package} version id ${version_id}"
+              else
+                echo "Deleting ${package} version id ${version_id}"
+                gh api -X DELETE "orgs/${ORG}/packages/container/${package}/versions/${version_id}"
+                deleted=$((deleted + 1))
+              fi
+            done
+          done
+
+          {
+            echo "## RC Image Cleanup"
+            echo ""
+            echo "- Organization: ${ORG}"
+            echo "- Package prefix: ${PACKAGE_PREFIX}"
+            echo "- Dry run: ${DRY_RUN}"
+            echo "- Packages scanned: ${scanned_packages}"
+            echo "- Package versions matched: ${candidates}"
+            echo "- Package versions deleted: ${deleted}"
+          } >> "${GITHUB_STEP_SUMMARY}"
