@@ -56,6 +56,9 @@ jobs:
           echo "Owner: ${OWNER} (type=${owner_type})"
           echo "Using ${scope_kind} package API scope: ${api_scope}"
           echo "Listing container packages for owner '${OWNER}'"
+
+          #TODO: Remove --verbose and debug output once verified working
+          gh api --paginate --verbose "${api_scope}/packages?package_type=container&per_page=100"
           mapfile -t packages < <(
             gh api --paginate "${api_scope}/packages?package_type=container&per_page=100" \
               --jq '.[].name' \
