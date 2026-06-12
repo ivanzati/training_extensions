@@ -19,7 +19,9 @@ jobs:
       packages: write
     env:
       ACTIONS_STEP_DEBUG: true
-      GH_TOKEN: ${{ github.token }}
+      # TODO: testing only - remove before production use
+      GH_TOKEN: ${{ secrets.WRITE_PACKAGES_TOKEN }}
+      # GH_TOKEN: ${{ github.token }}
       OWNER: ${{ github.repository_owner }}
       PACKAGE_PREFIX: geti-
       DRY_RUN: ${{ inputs.dry_run }}
