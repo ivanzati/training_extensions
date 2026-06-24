@@ -59,9 +59,7 @@ const GalleryList = ({
     isMediaItemReviewedById,
 }: GalleryListProps) => {
     const projectId = useProjectIdentifier();
-    const { selectedKeys, setSelectedKeys, toggleSelectedKeys } = useSelectedData();
-
-    const isSetSelectedKeys = selectedKeys instanceof Set;
+    const { selectedKeys, toggleSelectedKeys, isSelected } = useSelectedData();
 
     return (
         <VirtualizerGridLayout
@@ -73,11 +71,11 @@ const GalleryList = ({
             isPending={isPending}
             isLoadingMore={isFetchingNextPage}
             onLoadMore={fetchNextPage}
-            onSelectionChange={setSelectedKeys}
             contentItem={(item) => {
                 const mediaUrl = getThumbnailUrl(projectId, item.id);
                 const downloadUrl = getMediaDownloadUrl(projectId, item.id);
                 const mediaFileName = `${item.name}.${item.format}`;
+                const selected = isSelected(item.id);
 
                 return (
                     <MediaItem
@@ -98,9 +96,9 @@ const GalleryList = ({
                                 UNSAFE_style={{ margin: dimensionValue('size-150') }}
                             >
                                 <Checkbox
-                                    aria-label={`Select media item ${item.name}`}
+                                    aria-label={`Select media item ${item.id}`}
                                     onChange={() => toggleSelectedKeys([String(item.id)])}
-                                    isSelected={isSetSelectedKeys && selectedKeys.has(String(item.id))}
+                                    isSelected={selected}
                                 />
                             </Flex>
                         )}
@@ -110,7 +108,7 @@ const GalleryList = ({
 
                                 <MediaItemActions
                                     id={item.id}
-                                    onDeleted={toggleSelectedKeys}
+                                    onDeleted={selected ? toggleSelectedKeys : undefined}
                                     mediaUrl={downloadUrl}
                                     mediaFileName={mediaFileName}
                                     onAnnotate={() => onSelectedMediaItemChange(item)}

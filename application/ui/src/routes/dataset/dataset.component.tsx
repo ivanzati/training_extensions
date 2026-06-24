@@ -1,9 +1,10 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { dimensionValue, Grid, useViewMode, View } from '@geti/ui';
+import { dimensionValue, Grid, View } from '@geti/ui';
 import { useDatasetFiltersSearchParams } from 'hooks/use-dataset-filters-search-params.hook';
 import { useDatasetMediaWithReviewStatus } from 'hooks/use-dataset-media-with-review-status.hook';
+import { useViewMode } from 'hooks/use-view-mode.hook';
 
 import { Gallery } from '../../features/dataset/gallery/gallery.component';
 import { Toolbar } from '../../features/dataset/gallery/toolbar/toolbar.component';
@@ -31,7 +32,7 @@ export const Dataset = () => {
                 height='100%'
                 gridArea='content'
                 rows={['auto', 'auto', 'minmax(0, 1fr)']}
-                UNSAFE_style={{ padding: dimensionValue('size-350') }}
+                UNSAFE_style={{ padding: dimensionValue('size-300') }}
             >
                 <View gridRow='1 / 2'>
                     <ExportJobsList predicate={({ datasetId }) => datasetId === null} />
