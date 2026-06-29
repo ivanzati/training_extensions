@@ -108,8 +108,7 @@ jobs:
                       if type=="array" then .[] else . end
                     )
                     | map({id, tags: (.metadata.container.tags // []), created_at})
-                  ' \
-                || echo "[]"
+                  '
             )"
 
             if ! echo "${versions_json}" | jq -e 'type=="array"' >/dev/null; then
