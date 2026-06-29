@@ -128,8 +128,11 @@ jobs:
           FORCE: ${{ inputs.force }}
         run: |
           set -euo pipefail
-          SOURCE_IMAGE="ghcr.io/open-edge-platform/geti-${DEVICE}:${VERSION}"
-          TARGET_IMAGE="ghcr.io/open-edge-platform/geti-${DEVICE}:latest"
+          # TODO: to run in a forked PR, the image name must be changed to a personal GHCR namespace, e.g. ghcr.io/<fork-owner>/geti-${{ matrix.device }}. This is because forks cannot push to the upstream org's GHCR namespace.
+          # SOURCE_IMAGE="ghcr.io/open-edge-platform/geti-${DEVICE}:${VERSION}"
+          # TARGET_IMAGE="ghcr.io/open-edge-platform/geti-${DEVICE}:latest"
+          SOURCE_IMAGE="ghcr.io/ivanzati/geti-${DEVICE}:${VERSION}"
+          TARGET_IMAGE="ghcr.io/ivanzati/geti-${DEVICE}:latest"
 
           echo "Pulling ${SOURCE_IMAGE}"
           docker pull "${SOURCE_IMAGE}"
@@ -160,7 +163,9 @@ jobs:
       - name: Sign Docker image
         uses: open-edge-platform/geti-ci/actions/sign-image@7e686c1248b3939f8ee8e04e2612da727e379d91
         with:
-          image-uri: ghcr.io/open-edge-platform/geti-${{ matrix.device }}:latest
+          # TODO: to run in a forked PR, the image name must be changed to a personal GHCR namespace, e.g. ghcr.io/<fork-owner>/geti-${{ matrix.device }}. This is because forks cannot push to the upstream org's GHCR namespace.
+          # image-uri: ghcr.io/open-edge-platform/geti-${{ matrix.device }}:latest
+          image-uri: ghcr.io/ivanzati/geti-${{ matrix.device }}:latest
 
       - name: Print summary
         env:
@@ -170,6 +175,6 @@ jobs:
             echo "## Tagging Complete"
             echo ""
             echo "### Docker Images"
-            echo "- ghcr.io/open-edge-platform/geti-${DEVICE}:latest"
+            echo "- ghcr.io/ivanzati/geti-${DEVICE}:latest"
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"

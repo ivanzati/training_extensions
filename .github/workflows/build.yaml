@@ -83,7 +83,8 @@ jobs:
         id: meta
         uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
         with:
-          # TODO: changed for testing, revert back to original image names before merging
+
+          # TODO: to run in a forked PR, the image name must be changed to a personal GHCR namespace, e.g. ghcr.io/<fork-owner>/geti-${{ matrix.device }}. This is because forks cannot push to the upstream org's GHCR namespace.
           # images: ghcr.io/open-edge-platform/geti-${{ matrix.device }}
           images: ghcr.io/ivanzati/geti-${{ matrix.device }}
           tags: |
