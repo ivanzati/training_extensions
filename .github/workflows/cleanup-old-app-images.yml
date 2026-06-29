@@ -102,13 +102,13 @@ jobs:
             raw_versions="$(gh api --paginate "${api_scope}/packages/container/${package_url}/versions?per_page=100")"
 
             versions_json="$(
-              printf '%s\n' "${raw_versions}" \
-                | jq -sc '
-                    map(
-                      if type=="array" then .[] else . end
-                    )
-                    | map({id, tags: (.metadata.container.tags // []), created_at})
-                  '
+              printf '%s\n' "${raw_versions}" | \
+              jq -sc '
+                  map(
+                    if type=="array" then .[] else . end
+                  ) |
+                  map({id, tags: (.metadata.container.tags // []), created_at})
+              '
             )"
 
             if ! echo "${versions_json}" | jq -e 'type=="array"' >/dev/null; then
