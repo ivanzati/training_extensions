@@ -10,7 +10,7 @@ permissions: {} # No permissions by default
 jobs:
   validate:
     name: Validate RC tag
-    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     timeout-minutes: 5
@@ -18,7 +18,7 @@ jobs:
       rc_version: "${{ steps.validate.outputs.rc_version }}"
     steps:
       - name: Harden the runner (audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
 
@@ -126,7 +126,7 @@ jobs:
   publish-rc:
     name: Build and push container RC (${{ matrix.device }})
     needs: validate
-    runs-on: ${{ github.repository_owner == 'open-edge-platform' && 'overflow' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     permissions:
       contents: read # Checkout code
       packages: write # Push images to GHCR
@@ -139,7 +139,7 @@ jobs:
 
     steps:
       - name: Harden the runner (audit all outbound calls)
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
 
@@ -149,7 +149,7 @@ jobs:
           persist-credentials: false
 
       - name: Log in to Container Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -157,7 +157,7 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           # TODO: changed for testing, revert back to original image names before merging
           # images: ghcr.io/open-edge-platform/geti-${{ matrix.device }}
@@ -173,6 +173,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           use-cache: "false" # Disable cache for RC builds (security and reproducibility)
+          exclude-agpl-models: "true" # RC images must not bundle Ultralytics/AGPL-licensed models
 
       - name: Sign Docker image
         uses: open-edge-platform/geti-ci/actions/sign-image@7e686c1248b3939f8ee8e04e2612da727e379d91
@@ -204,3 +205,21 @@ jobs:
             --certificate-identity-regexp="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/.+" \
             --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
           EOF
+
+  windows-installer:
+    name: Build Windows MSIX RC (${{ matrix.device }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [cpu, xpu, cuda]
+    uses: ./.github/workflows/windows-installer.yml
+    with:
+      device: ${{ matrix.device }}
+      tag: ${{ needs.validate.outputs.rc_version }}
+      exclude-agpl-models: true # RC installers must not bundle Ultralytics/AGPL-licensed models
+    secrets:
+      MSIX_SIGN_CERTIFICATE: ${{ secrets.MSIX_SIGN_CERTIFICATE }}
+      MSIX_SIGN_CERTIFICATE_PASSWORD: ${{ secrets.MSIX_SIGN_CERTIFICATE_PASSWORD }}
+    permissions:
+      contents: read
